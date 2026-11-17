@@ -1,0 +1,6 @@
+InpRiskPercent=1.0
+InpMaxDailyLossPct=3.0
+InpMaxDrawdownPct=15.0
+InpMonthlyTargetPct=15.0
+InpMaxMarginUsePct=20.0
+InpMaxPositions=1

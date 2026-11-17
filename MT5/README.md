@@ -1,0 +1,39 @@
+# GoldSwingEA – MT5 XAUUSD Swing Expert Advisor
+
+## Strategy
+- **Trend filter:** D1 close > D1 EMA50 (buy) / < (sell)
+- **Signal TF (H4):** EMA21 > EMA50 > EMA200 (buy) / ulta (sell)
+- **Entry:** Price pichle 5 candles me EMA21 tak pullback kare, phir trend direction me
+  strong candle close ho + RSI 50–70 (buy) / 30–50 (sell)
+- **SL:** 1.5 × ATR  |  **TP:** 3.5 × ATR  (~1:2.3 Risk:Reward)
+- **Management:** 1R par 50% partial close, breakeven, ATR trailing stop
+
+## Risk protection
+| Feature | Default |
+|---|---|
+| Risk per trade | 2% equity (lot auto-calculate) |
+| Max daily loss | 5% – us din aur trade nahi |
+| Max drawdown (peak se) | 25% – sab close, EA halt |
+| Monthly target lock | 50% – hit hote hi us mahine naye trade band |
+| Margin cap | Free margin ka max 30% ek trade me |
+| Spread / session / Friday filter | Haan |
+
+## Install
+1. `Experts/GoldSwingEA.mq5` ko `MQL5/Experts/` me copy karein
+2. MetaEditor me open karke **F7** (compile)
+3. XAUUSD **H4** chart par lagayein, *Algo Trading* ON
+4. Preset: EA inputs → *Load* → `Presets/*.set`
+
+## Leverage aur 50% monthly – sach
+- 500x leverage **sirf margin** kam karti hai. Profit/loss lot size aur SL distance se aata hai.
+- H4 swing par ~4–10 trades/mahina aate hain. 50% monthly ke liye har trade par ~5%+
+  risk lagana padega – 5–6 consecutive losses (normal baat hai) = ~25–30% drawdown.
+- **Realistic:** Safe 3–8%, Moderate 5–15%, Aggressive kabhi +30–50%, kabhi -30–40%.
+- Isliye EA me monthly target lock + drawdown kill-switch diya hai.
+
+## Testing (zaroori)
+1. Strategy Tester → XAUUSD, H4, *Every tick based on real ticks*, kam se kam 2–3 saal
+2. Apne broker ke hisaab se `InpMaxSpreadPoints` aur session hours (server time) adjust karein
+3. Kam se kam 1 mahina demo, phir chhote real account se start
+
+> Disclaimer: Ye educational tool hai, financial advice nahi. Past performance future ki guarantee nahi.
