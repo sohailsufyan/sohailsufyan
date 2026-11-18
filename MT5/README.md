@@ -52,3 +52,6 @@
 - **News:** High-impact USD news se 30 min pehle/baad naya trade/DCA nahi, pehle profit me ho to close
   (sirf live/demo me kaam karta hai, Strategy Tester me MT5 calendar nahi hota)
 - **Account:** Hedging account zaroori
+- **S/R Levels (v1.20):** Previous Year, Half-year, Quarter, Month, Week, 3-Day, Day aur last 5 H4 candles ke
+  Open/High/Low/Close chart par draw hote hain (Y/6M/3M/1M/W par zone box). BUY ke thoda upar (ya SELL ke
+  thoda neeche) Week ya usse bada level ho to naya basket skip hota hai.

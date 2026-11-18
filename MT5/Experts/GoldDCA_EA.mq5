@@ -9,7 +9,7 @@
 //|  against ho to bada loss ho sakta hai. Basket stop OFF mat karein|
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "1.10"
+#property version   "1.20"
 
 #include <Trade/Trade.mqh>
 
@@ -82,6 +82,24 @@ input int             InpNewsAfterMin     = 30;           // News ke baad (min)
 input bool            InpNewsNoDCA        = true;         // News window me DCA layer bhi nahi
 input bool            InpNewsCloseProfit  = true;         // News se pehle basket profit me ho to close
 
+input group "=== S/R Levels (Y / 6M / 3M / 1M / W / 3D / D / H4) ==="
+input bool            InpShowLevels       = true;         // Chart par levels draw karo
+input bool            InpShowY            = true;         // Previous Year O/H/L/C
+input bool            InpShow6M           = true;         // Previous Half-year O/H/L/C
+input bool            InpShow3M           = true;         // Previous Quarter O/H/L/C
+input bool            InpShow1M           = true;         // Previous Month O/H/L/C
+input bool            InpShowW            = true;         // Previous Week O/H/L/C
+input bool            InpShow3D           = true;         // Last 3 Days O/H/L/C
+input bool            InpShowD            = true;         // Previous Day O/H/L/C
+input bool            InpShowH4           = true;         // Last H4 candles O/H/L/C
+input int             InpH4Count          = 5;            // Kitne H4 candles
+input bool            InpDrawZones        = true;         // Y/6M/3M/1M/W levels par zone (box)
+input double          InpZoneHalf         = 1.0;          // Zone half-width ($)
+input color           InpZoneColor        = C'45,45,70';  // Zone color
+input bool            InpUseSRFilter      = true;         // S/R ke paas against-direction entry block
+input double          InpSRBlockDist      = 3.0;          // BUY: resistance itne $ upar ho to skip (SELL ulta)
+input int             InpSRMinRank        = 3;            // Filter kin levels par: 7=Y 6=6M 5=3M 4=1M 3=W 2=3D 1=D 0=H4
+
 input group "=== Filters ==="
 input int             InpMaxSpreadPoints  = 50;           // Max spread (points)
 input bool            InpUseSession       = true;         // Session filter
@@ -96,6 +114,11 @@ CTrade   trade;
 int      hTF = INVALID_HANDLE, hTS = INVALID_HANDLE, hSF = INVALID_HANDLE, hSS = INVALID_HANDLE;
 int      hRSI = INVALID_HANDLE, hATR = INVALID_HANDLE, hMACD = INVALID_HANDLE;
 double   syncedTP = 0, syncedSL = 0; int syncedLayers = 0;
+
+struct SRLevel { double price; int rank; string tag; };
+SRLevel  levels[];
+datetime lastLevelsBar = 0, lastLevelsTry = 0;
+#define  SRPFX "GDCA_SR_"
 datetime lastSigBar = 0, lastCloseTime = 0, lastLayerTime = 0, lastNewsCheck = 0;
 bool     newsActive = false, newsSoon = false;
 bool     dayStopped = false;
@@ -129,6 +152,7 @@ int OnInit()
       Print("WARNING: Basket hard stop OFF hai - ek galat trend poora account khatam kar sakta hai!");
 
    ResetDay();
+   UpdateLevels(true);
    basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
    return(INIT_SUCCEEDED);
   }
@@ -137,12 +161,14 @@ void OnDeinit(const int reason)
   {
    IndicatorRelease(hTF); IndicatorRelease(hTS); IndicatorRelease(hSF);
    IndicatorRelease(hSS); IndicatorRelease(hRSI); IndicatorRelease(hATR); IndicatorRelease(hMACD);
+   ObjectsDeleteAll(0, SRPFX);
    Comment("");
   }
 
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   UpdateLevels(false);
    CheckNewDay();
    UpdateNews();
 
@@ -320,6 +346,8 @@ void TryNewBasket()
    if(sig == 0) return;
    if(sig == 1 && !InpAllowBuy) return;
    if(sig == -1 && !InpAllowSell) return;
+
+   if(InpUseSRFilter && SRBlocked(sig)) return;
 
    double lot = LayerLot(0);
    if(!MarginOK(sig, lot)) return;
@@ -502,6 +530,164 @@ bool Open(int dir, double lot, string tag)
    return false;
   }
 
+//==================== S/R LEVELS ====================
+bool AggMonths(datetime from, datetime to, double &o, double &h, double &l, double &c, datetime &t0)
+  {
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_MN1, from, to, r);   // oldest first
+   if(n <= 0) return false;
+   o = r[0].open; c = r[n - 1].close; h = r[0].high; l = r[0].low; t0 = r[0].time;
+   for(int i = 1; i < n; i++) { h = MathMax(h, r[i].high); l = MathMin(l, r[i].low); }
+   return true;
+  }
+
+bool AggBars(ENUM_TIMEFRAMES tf, int start, int count, double &o, double &h, double &l, double &c, datetime &t0)
+  {
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   if(CopyRates(_Symbol, tf, start, count, r) != count) return false;
+   o = r[count - 1].open; c = r[0].close; h = r[0].high; l = r[0].low; t0 = r[count - 1].time;
+   for(int i = 1; i < count; i++) { h = MathMax(h, r[i].high); l = MathMin(l, r[i].low); }
+   return true;
+  }
+
+datetime MonthStart(int year, int mon)
+  {
+   while(mon <= 0) { mon += 12; year--; }
+   MqlDateTime d; ZeroMemory(d);
+   d.year = year; d.mon = mon; d.day = 1;
+   return StructToTime(d);
+  }
+
+void AddLevel(double price, int rank, string tag)
+  {
+   int n = ArraySize(levels);
+   ArrayResize(levels, n + 1);
+   levels[n].price = price; levels[n].rank = rank; levels[n].tag = tag;
+  }
+
+void DrawLine(string id, datetime t1, double price, color clr, int width, ENUM_LINE_STYLE style, string label, bool zone, datetime t2)
+  {
+   string n = SRPFX + id;
+   if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_TREND, 0, t1, price, t2, price);
+   else { ObjectMove(0, n, 0, t1, price); ObjectMove(0, n, 1, t2, price); }
+   ObjectSetInteger(0, n, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, n, OBJPROP_WIDTH, width);
+   ObjectSetInteger(0, n, OBJPROP_STYLE, style);
+   ObjectSetInteger(0, n, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_BACK, true);
+   ObjectSetString(0, n, OBJPROP_TOOLTIP, label + " " + DoubleToString(price, _Digits));
+
+   string t = n + "_T";
+   if(ObjectFind(0, t) < 0) ObjectCreate(0, t, OBJ_TEXT, 0, t2, price);
+   else ObjectMove(0, t, 0, t2, price);
+   ObjectSetString(0, t, OBJPROP_TEXT, label + " " + DoubleToString(price, _Digits));
+   ObjectSetInteger(0, t, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, t, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, t, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+   ObjectSetInteger(0, t, OBJPROP_SELECTABLE, false);
+
+   if(zone && InpDrawZones && InpZoneHalf > 0)
+     {
+      string z = n + "_Z";
+      if(ObjectFind(0, z) < 0) ObjectCreate(0, z, OBJ_RECTANGLE, 0, t1, price + InpZoneHalf, t2, price - InpZoneHalf);
+      else { ObjectMove(0, z, 0, t1, price + InpZoneHalf); ObjectMove(0, z, 1, t2, price - InpZoneHalf); }
+      ObjectSetInteger(0, z, OBJPROP_COLOR, InpZoneColor);
+      ObjectSetInteger(0, z, OBJPROP_FILL, true);
+      ObjectSetInteger(0, z, OBJPROP_BACK, true);
+      ObjectSetInteger(0, z, OBJPROP_SELECTABLE, false);
+     }
+  }
+
+void AddOHLC(string name, int rank, bool show, double o, double h, double l, double c, datetime t0,
+             color clr, int width, ENUM_LINE_STYLE style, bool zone, datetime t2)
+  {
+   AddLevel(o, rank, name + "-O"); AddLevel(h, rank, name + "-H");
+   AddLevel(l, rank, name + "-L"); AddLevel(c, rank, name + "-C");
+   if(!InpShowLevels || !show) return;
+   DrawLine(name + "_O", t0, o, clr, width, style, name + " Open",  zone, t2);
+   DrawLine(name + "_H", t0, h, clr, width, style, name + " High",  zone, t2);
+   DrawLine(name + "_L", t0, l, clr, width, style, name + " Low",   zone, t2);
+   DrawLine(name + "_C", t0, c, clr, width, style, name + " Close", zone, t2);
+  }
+
+void UpdateLevels(bool force)
+  {
+   datetime h4 = iTime(_Symbol, PERIOD_H4, 0);
+   if(!force && h4 == lastLevelsBar) return;
+   if(!force && TimeCurrent() - lastLevelsTry < 10) return;   // history load retry throttle
+   lastLevelsTry = TimeCurrent();
+
+   ArrayResize(levels, 0);
+   ObjectsDeleteAll(0, SRPFX);
+   datetime t2 = TimeCurrent() + PeriodSeconds(PERIOD_H4) * 6;
+   MqlDateTime now; TimeToStruct(TimeCurrent(), now);
+   double o, h, l, c; datetime t0;
+   bool ok = true;
+
+   // Previous Year
+   if(AggMonths(MonthStart(now.year - 1, 1), MonthStart(now.year - 1, 12), o, h, l, c, t0))
+      AddOHLC("Y", 7, InpShowY, o, h, l, c, t0, clrRed, 3, STYLE_SOLID, true, t2);
+   else ok = false;
+
+   // Previous Half-year (Jan-Jun / Jul-Dec)
+   int hs = (now.mon <= 6) ? 7 : 1;  int hy = (now.mon <= 6) ? now.year - 1 : now.year;
+   if(AggMonths(MonthStart(hy, hs), MonthStart(hy, hs + 5), o, h, l, c, t0))
+      AddOHLC("6M", 6, InpShow6M, o, h, l, c, t0, clrOrangeRed, 3, STYLE_SOLID, true, t2);
+   else ok = false;
+
+   // Previous Quarter
+   int qStart = ((now.mon - 1) / 3) * 3 + 1 - 3;   // pichle quarter ka pehla month
+   datetime qs = MonthStart(now.year, qStart);
+   MqlDateTime qd; TimeToStruct(qs, qd);
+   if(AggMonths(qs, MonthStart(qd.year, qd.mon + 2), o, h, l, c, t0))
+      AddOHLC("3M", 5, InpShow3M, o, h, l, c, t0, clrOrange, 2, STYLE_SOLID, true, t2);
+   else ok = false;
+
+   if(AggBars(PERIOD_MN1, 1, 1, o, h, l, c, t0))
+      AddOHLC("1M", 4, InpShow1M, o, h, l, c, t0, clrGold, 2, STYLE_SOLID, true, t2);
+   else ok = false;
+
+   if(AggBars(PERIOD_W1, 1, 1, o, h, l, c, t0))
+      AddOHLC("W", 3, InpShowW, o, h, l, c, t0, clrDodgerBlue, 2, STYLE_SOLID, true, t2);
+   else ok = false;
+
+   if(AggBars(PERIOD_D1, 1, 3, o, h, l, c, t0))
+      AddOHLC("3D", 2, InpShow3D, o, h, l, c, t0, clrMediumPurple, 1, STYLE_DASH, false, t2);
+   else ok = false;
+
+   if(AggBars(PERIOD_D1, 1, 1, o, h, l, c, t0))
+      AddOHLC("D", 1, InpShowD, o, h, l, c, t0, clrSilver, 1, STYLE_DASH, false, t2);
+   else ok = false;
+
+   for(int i = 1; i <= InpH4Count; i++)
+     {
+      if(AggBars(PERIOD_H4, i, 1, o, h, l, c, t0))
+         AddOHLC("H4#" + IntegerToString(i), 0, InpShowH4, o, h, l, c, t0, clrGray, 1, STYLE_DOT, false, t2);
+      else ok = false;
+     }
+
+   if(ok) lastLevelsBar = h4;   // history poori nahi aayi to agle tick par phir try
+   ChartRedraw();
+  }
+
+// BUY ke upar paas me resistance / SELL ke neeche paas me support ho to block
+bool SRBlocked(int dir)
+  {
+   double price = dir == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   for(int i = 0; i < ArraySize(levels); i++)
+     {
+      if(levels[i].rank < InpSRMinRank) continue;
+      double d = levels[i].price - price;
+      if(dir == 1 && d > 0 && d <= InpSRBlockDist)
+        { PrintFormat("BUY skip: resistance %s %.2f paas me", levels[i].tag, levels[i].price); return true; }
+      if(dir == -1 && d < 0 && -d <= InpSRBlockDist)
+        { PrintFormat("SELL skip: support %s %.2f paas me", levels[i].tag, levels[i].price); return true; }
+     }
+   return false;
+  }
+
 //==================== NEWS ====================
 void UpdateNews()
   {
@@ -531,7 +717,7 @@ void ShowPanel()
    int d; double avg, lots, lp, pr; int layers;
    GetBasket(d, layers, avg, lots, lp, pr);
    Comment(StringFormat(
-      "GoldDCA_EA v1.10 | %s\n"
+      "GoldDCA_EA v1.20 | %s\n"
       "Status      : %s\n"
       "Trend (%s)  : %s\n"
       "News        : %s\n"
