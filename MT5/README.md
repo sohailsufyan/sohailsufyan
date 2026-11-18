@@ -55,3 +55,18 @@
 - **S/R Levels (v1.20):** Previous Year, Half-year, Quarter, Month, Week, 3-Day, Day aur last 5 H4 candles ke
   Open/High/Low/Close chart par draw hote hain (sab par zone box: bade levels ±$1, 3D/D/H4 ±$0.5). BUY ke thoda upar (ya SELL ke
   thoda neeche) Week ya usse bada level ho to naya basket skip hota hai.
+
+## GoldDCA_EA v2.00 – Scalp + Intraday (dono saath)
+| | Scalp | Intraday |
+|---|---|---|
+| Signal / Trend TF | M5 / M15 | M15 / H1 |
+| DCA step | $4 | $7 |
+| Max layers | 4 (lot x1.2) | 6 (lot x1.3) |
+| TP | 0.6 x ATR (min $0.8) | 0.5 x ATR (min $1.5) |
+| Basket hard stop | 6% equity | 12% equity |
+| Magic | base + 1 | base + 2 |
+
+- Dono engine **H1 master trend** ki direction me hi entry lete hain (UP = sirf BUY, DOWN = sirf SELL, sideways = no entry)
+- Ek engine BUY basket me ho to doosra SELL nahi kholta (`InpNoOpposite`)
+- Daily target 5% / daily loss 15% poore account par (dono engine milake)
+- Sirf ek chahiye to `InpScOn` ya `InpInOn` = false

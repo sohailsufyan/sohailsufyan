@@ -1,62 +1,91 @@
 //+------------------------------------------------------------------+
 //|                                                GoldDCA_EA.mq5    |
-//|  XAUUSD Trend-following DCA EA                                   |
-//|  - Trend direction me entry (H1 trend + M15 signal)              |
-//|  - Price $X against jaye to naya layer (DCA)                     |
-//|  - Basket average price + target par sab close                   |
-//|  - Daily target / daily loss / basket hard stop / news filter    |
-//|  WARNING: DCA me win-rate high hota hai, lekin ek bada trend     |
-//|  against ho to bada loss ho sakta hai. Basket stop OFF mat karein|
+//|  XAUUSD Trend-following DCA EA - SCALP + INTRADAY (dono saath)   |
+//|  - Master trend (H1) ki direction me hi dono engine trade lete   |
+//|  - Scalp   : M5 signal, M15 trend, chhota step/TP, kam layers    |
+//|  - Intraday: M15 signal, H1 trend, $7 step, bada TP              |
+//|  - Har engine ka alag basket (alag magic), alag TP/SL            |
+//|  - MACD + RSI + ATR confirm, S/R levels, news filter, daily limit|
+//|  WARNING: DCA me ek bada trend against ho to bada loss ho sakta  |
+//|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "1.21"
+#property version   "2.00"
 
 #include <Trade/Trade.mqh>
 
-enum ENUM_LOT_MODE { LOT_FIXED = 0, LOT_AUTO = 1 };
+enum ENUM_LOT_MODE  { LOT_FIXED = 0, LOT_AUTO = 1 };
 enum ENUM_STEP_MODE { STEP_FIXED_PRICE = 0, STEP_ATR = 1 };
-enum ENUM_TP_MODE { TP_FIXED_PRICE = 0, TP_ATR = 1 };
+enum ENUM_TP_MODE   { TP_FIXED_PRICE = 0, TP_ATR = 1 };
 
 input group "=== General ==="
-input long            InpMagic            = 888001;       // Magic number
+input long            InpMagic            = 888001;       // Base magic (Scalp = +1, Intraday = +2)
 input string          InpComment          = "GoldDCA";    // Order comment
-input ENUM_TIMEFRAMES InpSignalTF         = PERIOD_M15;   // Entry signal timeframe
-input ENUM_TIMEFRAMES InpTrendTF          = PERIOD_H1;    // Trend timeframe
+input ENUM_TIMEFRAMES InpMasterTF         = PERIOD_H1;    // Master trend timeframe (dono engine follow karenge)
+input int             InpMasterFastEMA    = 50;           // Master fast EMA
+input int             InpMasterSlowEMA    = 200;          // Master slow EMA
+input bool            InpNoOpposite       = true;         // Ek engine BUY me ho to doosra SELL na khole
 
-input group "=== Lot Size ==="
+input group "=== Lot Size (shared) ==="
 input ENUM_LOT_MODE   InpLotMode          = LOT_AUTO;     // Lot mode
 input double          InpFixedLot         = 0.01;         // Fixed first lot
 input double          InpBalancePerLot    = 1000.0;       // AUTO: har itne $ balance par 0.01 lot
-input double          InpLotMultiplier    = 1.3;          // Har DCA layer par lot x (1.0 = same lot)
 input double          InpMaxLot           = 2.0;          // Max lot per layer
 
-input group "=== DCA ==="
-input ENUM_STEP_MODE  InpStepMode         = STEP_FIXED_PRICE; // DCA step mode
-input double          InpStepPrice        = 7.0;          // Step: price $X against (Gold $7)
-input double          InpStepATRMult      = 1.0;          // Step: ATR x (agar ATR mode)
-input double          InpStepGrowth       = 1.2;          // Har layer par step x (gap badhta jaye)
-input int             InpMaxLayers        = 6;            // Max layers (first trade included)
+input group "=== SCALP Engine ==="
+input bool            InpScOn             = true;             // Scalp ON
+input ENUM_TIMEFRAMES InpScSigTF          = PERIOD_M5;        // Scalp signal TF
+input ENUM_TIMEFRAMES InpScTrendTF        = PERIOD_M15;       // Scalp trend TF
+input double          InpScLotFactor      = 1.0;              // Scalp first lot x base lot
+input double          InpScLotMult        = 1.2;              // Scalp DCA lot multiplier
+input ENUM_STEP_MODE  InpScStepMode       = STEP_FIXED_PRICE; // Scalp step mode
+input double          InpScStep           = 4.0;              // Scalp DCA step ($)
+input double          InpScStepATR        = 1.0;              // Scalp step ATR x (ATR mode)
+input double          InpScStepGrowth     = 1.2;              // Scalp step growth
+input int             InpScMaxLayers      = 4;                // Scalp max layers
+input ENUM_TP_MODE    InpScTPMode         = TP_ATR;           // Scalp TP mode
+input double          InpScTP             = 1.0;              // Scalp fixed TP ($ from average)
+input double          InpScTP_ATR         = 0.6;              // Scalp TP ATR x
+input double          InpScTPMin          = 0.8;              // Scalp min TP ($)
+input double          InpScStopPct        = 6.0;              // Scalp basket hard stop (% equity)
+input int             InpScCooldownMin    = 2;                // Scalp cooldown (min)
+input int             InpScMaxBaskets     = 30;               // Scalp max baskets/day
+input double          InpScMaxATR         = 8.0;              // Scalp: signal ATR max ($)
+input double          InpScMinATR         = 0.5;              // Scalp: signal ATR min ($)
+
+input group "=== INTRADAY Engine ==="
+input bool            InpInOn             = true;             // Intraday ON
+input ENUM_TIMEFRAMES InpInSigTF          = PERIOD_M15;       // Intraday signal TF
+input ENUM_TIMEFRAMES InpInTrendTF        = PERIOD_H1;        // Intraday trend TF
+input double          InpInLotFactor      = 1.0;              // Intraday first lot x base lot
+input double          InpInLotMult        = 1.3;              // Intraday DCA lot multiplier
+input ENUM_STEP_MODE  InpInStepMode       = STEP_FIXED_PRICE; // Intraday step mode
+input double          InpInStep           = 7.0;              // Intraday DCA step ($)
+input double          InpInStepATR        = 1.0;              // Intraday step ATR x (ATR mode)
+input double          InpInStepGrowth     = 1.2;              // Intraday step growth
+input int             InpInMaxLayers      = 6;                // Intraday max layers
+input ENUM_TP_MODE    InpInTPMode         = TP_ATR;           // Intraday TP mode
+input double          InpInTP             = 2.0;              // Intraday fixed TP ($ from average)
+input double          InpInTP_ATR         = 0.5;              // Intraday TP ATR x
+input double          InpInTPMin          = 1.5;              // Intraday min TP ($)
+input double          InpInStopPct        = 12.0;             // Intraday basket hard stop (% equity)
+input int             InpInCooldownMin    = 5;                // Intraday cooldown (min)
+input int             InpInMaxBaskets     = 20;               // Intraday max baskets/day
+input double          InpInMaxATR         = 15.0;             // Intraday: signal ATR max ($)
+input double          InpInMinATR         = 1.0;              // Intraday: signal ATR min ($)
+
+input group "=== DCA / Exit (shared) ==="
 input int             InpMinSecBetween    = 60;           // Layers ke beech min seconds
 input bool            InpAddOnlyInTrend   = true;         // Trend palat jaye to naya layer mat jodo
+input bool            InpBrokerSLTP       = true;         // Auto SL/TP broker par bhi lagao
 
-input group "=== Basket Exit ==="
-input ENUM_TP_MODE    InpTPMode           = TP_ATR;       // Basket TP mode
-input double          InpTPPrice          = 2.0;          // Fixed: average price se $X profit par close
-input double          InpTP_ATRMult       = 0.5;          // ATR: average se ATR x profit par close
-input double          InpTPMinPrice       = 1.5;          // ATR mode me TP kam se kam $X
-input bool            InpBrokerSLTP       = true;         // Auto SL/TP broker par bhi lagao (EA/VPS off ho tab bhi safe)
-input double          InpTPMoney          = 0.0;          // Ya basket profit $ (0 = off)
-input double          InpBasketStopPct    = 15.0;         // Basket loss equity ka % ho to sab close (HARD STOP)
-input int             InpCooldownMin      = 5;            // Basket close ke baad wait (minutes)
-
-input group "=== Daily Limits ==="
+input group "=== Daily Limits (account) ==="
 input double          InpDailyTargetPct   = 5.0;          // Daily target % - hit hone par naye basket band
 input double          InpDailyLossPct     = 15.0;         // Daily max loss % - sab close, din band
-input int             InpMaxBasketsPerDay = 30;           // Max baskets per day
 
-input group "=== Entry Strategy ==="
-input int             InpTrendFastEMA     = 50;           // Trend TF fast EMA
-input int             InpTrendSlowEMA     = 200;          // Trend TF slow EMA
+input group "=== Entry Indicators (shared) ==="
+input int             InpTrendFastEMA     = 50;           // Engine trend TF fast EMA
+input int             InpTrendSlowEMA     = 200;          // Engine trend TF slow EMA
 input int             InpSigFastEMA       = 9;            // Signal TF fast EMA
 input int             InpSigSlowEMA       = 21;           // Signal TF slow EMA
 input int             InpRSIPeriod        = 14;           // RSI period
@@ -64,16 +93,12 @@ input double          InpRSIBuyMin        = 50;           // BUY: RSI min
 input double          InpRSIBuyMax        = 72;           // BUY: RSI max
 input double          InpRSISellMin       = 28;           // SELL: RSI min
 input double          InpRSISellMax       = 50;           // SELL: RSI max
-input int             InpATRPeriod        = 14;           // ATR period (signal TF)
-input double          InpMaxATRPrice      = 15.0;         // Signal TF ATR isse zyada ho to entry nahi (volatility)
-input double          InpMinATRPrice      = 1.0;          // ATR isse kam ho to entry nahi (dead market)
-
-input group "=== MACD Confirmation ==="
+input int             InpATRPeriod        = 14;           // ATR period
 input bool            InpUseMACD          = true;         // MACD confirm ON
 input int             InpMACDFast         = 12;           // MACD fast
 input int             InpMACDSlow         = 26;           // MACD slow
 input int             InpMACDSignal       = 9;            // MACD signal
-input bool            InpMACDZeroLine     = true;         // BUY ke liye MACD > 0, SELL ke liye < 0
+input bool            InpMACDZeroLine     = true;         // BUY: MACD > 0, SELL: MACD < 0
 
 input group "=== News Filter (live only, MT5 calendar) ==="
 input bool            InpUseNews          = true;         // News filter ON
@@ -111,58 +136,106 @@ input bool            InpFridayStop       = true;         // Friday 20:00 ke baa
 input bool            InpAllowBuy         = true;         // Allow BUY
 input bool            InpAllowSell        = true;         // Allow SELL
 
-//==================== GLOBALS ====================
+//==================== ENGINE ====================
+struct Engine
+  {
+   string            name;
+   bool              on;
+   long              magic;
+   ENUM_TIMEFRAMES   sigTF, trendTF;
+   int               hTF, hTS, hSF, hSS, hRSI, hATR, hMACD;
+   double            lotFactor, lotMult;
+   int               stepMode; double step, stepATR, stepGrowth;
+   int               maxLayers;
+   int               tpMode; double tp, tpATR, tpMin;
+   double            stopPct, maxATR, minATR;
+   int               cooldownMin, maxBaskets;
+   // state
+   datetime          lastSigBar, lastCloseTime, lastLayerTime;
+   double            basketStartEq, syncedTP, syncedSL;
+   int               syncedLayers, basketsToday, tradesToday;
+  };
+
 CTrade   trade;
-int      hTF = INVALID_HANDLE, hTS = INVALID_HANDLE, hSF = INVALID_HANDLE, hSS = INVALID_HANDLE;
-int      hRSI = INVALID_HANDLE, hATR = INVALID_HANDLE, hMACD = INVALID_HANDLE;
-double   syncedTP = 0, syncedSL = 0; int syncedLayers = 0;
+Engine   E[2];
+int      hMF = INVALID_HANDLE, hMS = INVALID_HANDLE;
+datetime lastNewsCheck = 0;
+bool     newsActive = false, newsSoon = false, dayStopped = false;
+double   dayStartEq = 0;
+int      dayKey = -1;
 
 struct SRLevel { double price; int rank; string tag; };
 SRLevel  levels[];
 datetime lastLevelsBar = 0, lastLevelsTry = 0;
 #define  SRPFX "GDCA_SR_"
-datetime lastSigBar = 0, lastCloseTime = 0, lastLayerTime = 0, lastNewsCheck = 0;
-bool     newsActive = false, newsSoon = false;
-bool     dayStopped = false;
-double   dayStartEq = 0, basketStartEq = 0;
-int      dayKey = -1, basketsToday = 0, tradesToday = 0;
+
+bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES sig, ENUM_TIMEFRAMES tr,
+                 double lotF, double lotM, int stepMode, double step, double stepATR, double growth, int layers,
+                 int tpMode, double tp, double tpATR, double tpMin, double stopPct, int cool, int maxB,
+                 double maxATR, double minATR)
+  {
+   e.name = name; e.on = on; e.magic = magic; e.sigTF = sig; e.trendTF = tr;
+   e.lotFactor = lotF; e.lotMult = lotM; e.stepMode = stepMode; e.step = step; e.stepATR = stepATR;
+   e.stepGrowth = growth; e.maxLayers = layers; e.tpMode = tpMode; e.tp = tp; e.tpATR = tpATR; e.tpMin = tpMin;
+   e.stopPct = stopPct; e.cooldownMin = cool; e.maxBaskets = maxB; e.maxATR = maxATR; e.minATR = minATR;
+   e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
+   e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
+   e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
+   e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
+   if(!on) return true;
+   e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
+   e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
+   e.hSF   = iMA(_Symbol, sig, InpSigFastEMA, 0, MODE_EMA, PRICE_CLOSE);
+   e.hSS   = iMA(_Symbol, sig, InpSigSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
+   e.hRSI  = iRSI(_Symbol, sig, InpRSIPeriod, PRICE_CLOSE);
+   e.hATR  = iATR(_Symbol, sig, InpATRPeriod);
+   e.hMACD = iMACD(_Symbol, sig, InpMACDFast, InpMACDSlow, InpMACDSignal, PRICE_CLOSE);
+   return !(e.hTF == INVALID_HANDLE || e.hTS == INVALID_HANDLE || e.hSF == INVALID_HANDLE ||
+            e.hSS == INVALID_HANDLE || e.hRSI == INVALID_HANDLE || e.hATR == INVALID_HANDLE || e.hMACD == INVALID_HANDLE);
+  }
+
+void ReleaseEngine(Engine &e)
+  {
+   if(!e.on) return;
+   IndicatorRelease(e.hTF); IndicatorRelease(e.hTS); IndicatorRelease(e.hSF); IndicatorRelease(e.hSS);
+   IndicatorRelease(e.hRSI); IndicatorRelease(e.hATR); IndicatorRelease(e.hMACD);
+  }
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(50);
    trade.SetTypeFillingBySymbol(_Symbol);
 
-   hTF  = iMA(_Symbol, InpTrendTF, InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   hTS  = iMA(_Symbol, InpTrendTF, InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   hSF  = iMA(_Symbol, InpSignalTF, InpSigFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   hSS  = iMA(_Symbol, InpSignalTF, InpSigSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   hRSI = iRSI(_Symbol, InpSignalTF, InpRSIPeriod, PRICE_CLOSE);
-   hATR = iATR(_Symbol, InpSignalTF, InpATRPeriod);
-   hMACD = iMACD(_Symbol, InpSignalTF, InpMACDFast, InpMACDSlow, InpMACDSignal, PRICE_CLOSE);
-   if(hMACD == INVALID_HANDLE ||hTF == INVALID_HANDLE || hTS == INVALID_HANDLE || hSF == INVALID_HANDLE ||
-      hSS == INVALID_HANDLE || hRSI == INVALID_HANDLE || hATR == INVALID_HANDLE)
-     {
-      Print("Indicator handle error: ", GetLastError());
-      return(INIT_FAILED);
-     }
+   hMF = iMA(_Symbol, InpMasterTF, InpMasterFastEMA, 0, MODE_EMA, PRICE_CLOSE);
+   hMS = iMA(_Symbol, InpMasterTF, InpMasterSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
+   if(hMF == INVALID_HANDLE || hMS == INVALID_HANDLE) return(INIT_FAILED);
+
+   if(!SetupEngine(E[0], "SCALP", InpScOn, InpMagic + 1, InpScSigTF, InpScTrendTF, InpScLotFactor, InpScLotMult,
+                   InpScStepMode, InpScStep, InpScStepATR, InpScStepGrowth, InpScMaxLayers,
+                   InpScTPMode, InpScTP, InpScTP_ATR, InpScTPMin, InpScStopPct, InpScCooldownMin, InpScMaxBaskets,
+                   InpScMaxATR, InpScMinATR))
+     { Print("Scalp indicator error: ", GetLastError()); return(INIT_FAILED); }
+   if(!SetupEngine(E[1], "INTRADAY", InpInOn, InpMagic + 2, InpInSigTF, InpInTrendTF, InpInLotFactor, InpInLotMult,
+                   InpInStepMode, InpInStep, InpInStepATR, InpInStepGrowth, InpInMaxLayers,
+                   InpInTPMode, InpInTP, InpInTP_ATR, InpInTPMin, InpInStopPct, InpInCooldownMin, InpInMaxBaskets,
+                   InpInMaxATR, InpInMinATR))
+     { Print("Intraday indicator error: ", GetLastError()); return(INIT_FAILED); }
 
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: Ye EA HEDGING account ke liye hai. Netting account par layers merge ho jayenge.");
-   if(InpBasketStopPct <= 0)
+   if(InpScStopPct <= 0 || InpInStopPct <= 0)
       Print("WARNING: Basket hard stop OFF hai - ek galat trend poora account khatam kar sakta hai!");
 
    ResetDay();
    UpdateLevels(true);
-   basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
    return(INIT_SUCCEEDED);
   }
 
 void OnDeinit(const int reason)
   {
-   IndicatorRelease(hTF); IndicatorRelease(hTS); IndicatorRelease(hSF);
-   IndicatorRelease(hSS); IndicatorRelease(hRSI); IndicatorRelease(hATR); IndicatorRelease(hMACD);
+   IndicatorRelease(hMF); IndicatorRelease(hMS);
+   ReleaseEngine(E[0]); ReleaseEngine(E[1]);
    ObjectsDeleteAll(0, SRPFX);
    Comment("");
   }
@@ -174,14 +247,17 @@ void OnTick()
    CheckNewDay();
    UpdateNews();
 
-   int    dir; double avg, lots, lastPrice, profit; int layers;
-   GetBasket(dir, layers, avg, lots, lastPrice, profit);
-
-   if(layers > 0)
-      ManageBasket(dir, layers, avg, lastPrice, profit);
-   else
-      TryNewBasket();
-
+   for(int k = 0; k < 2; k++)
+     {
+      if(!E[k].on && CountLayers(E[k]) == 0) continue;
+      int dir, layers; double avg, lots, lastPrice, profit;
+      GetBasket(E[k], dir, layers, avg, lots, lastPrice, profit);
+      if(layers > 0)
+         ManageBasket(E[k], dir, layers, avg, lastPrice, profit);
+      else
+         if(E[k].on)
+            TryNewBasket(E[k], k);
+     }
    ShowPanel();
   }
 
@@ -191,26 +267,22 @@ void ResetDay()
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
    dayKey = dt.year * 1000 + dt.day_of_year;
    dayStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
-   basketsToday = 0; tradesToday = 0;
    dayStopped = false;
+   for(int k = 0; k < 2; k++) { E[k].basketsToday = 0; E[k].tradesToday = 0; }
   }
 
 void CheckNewDay()
   {
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
-   int k = dt.year * 1000 + dt.day_of_year;
-   if(k != dayKey)
-     {
-      // Basket khula ho to day reset mat karo jab tak close na ho (daily % sahi rahe)
-      if(CountLayers() == 0) ResetDay();
-     }
+   if(dt.year * 1000 + dt.day_of_year != dayKey && CountLayers(E[0]) + CountLayers(E[1]) == 0)
+      ResetDay();
 
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(!dayStopped && dayStartEq > 0 && InpDailyLossPct > 0 &&
       (dayStartEq - eq) / dayStartEq * 100.0 >= InpDailyLossPct)
      {
       PrintFormat("Daily loss %.1f%% hit - sab close, aaj trading band.", InpDailyLossPct);
-      CloseBasket();
+      CloseBasket(E[0]); CloseBasket(E[1]);
       dayStopped = true;
      }
   }
@@ -222,26 +294,30 @@ double DayPLPct()
   }
 
 //==================== BASKET ====================
-int CountLayers()
+bool IsMine(Engine &e)
+  {
+   return PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == e.magic;
+  }
+
+int CountLayers(Engine &e)
   {
    int c = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(PositionGetTicket(i) == 0) continue;
-      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagic) c++;
+      if(IsMine(e)) c++;
      }
    return c;
   }
 
-// dir: 1 buy, -1 sell. lastPrice = sabse kharab (latest DCA) entry
-void GetBasket(int &dir, int &layers, double &avg, double &lots, double &lastPrice, double &profit)
+void GetBasket(Engine &e, int &dir, int &layers, double &avg, double &lots, double &lastPrice, double &profit)
   {
    dir = 0; layers = 0; avg = 0; lots = 0; lastPrice = 0; profit = 0;
    double sumPV = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(PositionGetTicket(i) == 0) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      if(!IsMine(e)) continue;
       double v = PositionGetDouble(POSITION_VOLUME);
       double p = PositionGetDouble(POSITION_PRICE_OPEN);
       bool buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
@@ -254,110 +330,115 @@ void GetBasket(int &dir, int &layers, double &avg, double &lots, double &lastPri
    if(lots > 0) avg = sumPV / lots;
   }
 
-void ManageBasket(int dir, int layers, double avg, double lastPrice, double profit)
+void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, double profit)
   {
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   if(InpBrokerSLTP) SyncSLTP(e, dir, layers, avg);
 
    //--- 1) Basket TP
-   if(InpBrokerSLTP) SyncSLTP(dir, layers, avg);
-   double tpDist = TPDist();
+   double tpDist = TPDist(e);
    bool tpHit = (dir == 1) ? (bid >= avg + tpDist) : (ask <= avg - tpDist);
-   if(InpTPMoney > 0 && profit >= InpTPMoney) tpHit = true;
    if(tpHit && profit > 0)
      {
-      PrintFormat("Basket TP: %d layers, profit %.2f", layers, profit);
-      CloseBasket();
+      PrintFormat("[%s] Basket TP: %d layers, profit %.2f", e.name, layers, profit);
+      CloseBasket(e);
       return;
      }
 
    //--- 2) Hard stop
-   if(InpBasketStopPct > 0 && basketStartEq > 0 && profit < 0 &&
-      (-profit) / basketStartEq * 100.0 >= InpBasketStopPct)
+   if(e.stopPct > 0 && e.basketStartEq > 0 && profit < 0 &&
+      (-profit) / e.basketStartEq * 100.0 >= e.stopPct)
      {
-      PrintFormat("BASKET HARD STOP: loss %.2f (%.1f%%). Sab close.", profit, InpBasketStopPct);
-      CloseBasket();
+      PrintFormat("[%s] BASKET HARD STOP: loss %.2f (%.1f%%). Sab close.", e.name, profit, e.stopPct);
+      CloseBasket(e);
       return;
      }
 
    //--- 3) News se pehle profit lock
    if(InpUseNews && InpNewsCloseProfit && newsSoon && profit > 0)
      {
-      Print("High-impact news aa rahi hai - basket profit me close.");
-      CloseBasket();
+      PrintFormat("[%s] High-impact news aa rahi hai - basket profit me close.", e.name);
+      CloseBasket(e);
       return;
      }
 
-   //--- 4) DCA layer add
-   if(layers >= InpMaxLayers) return;
+   //--- 4) DCA layer
+   if(!e.on || dayStopped) return;
+   if(layers >= e.maxLayers) return;
    if(InpUseNews && InpNewsNoDCA && newsActive) return;
-   if(TimeCurrent() - lastLayerTime < InpMinSecBetween) return;
+   if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) return;
    if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > InpMaxSpreadPoints) return;
-   if(InpAddOnlyInTrend && TrendDir() != dir) return;
+   if(InpAddOnlyInTrend && TrendDir(e.hTF, e.hTS, e.trendTF) != dir) return;
 
-   double step = BaseStep() * MathPow(InpStepGrowth, layers - 1);
+   double step = BaseStep(e) * MathPow(e.stepGrowth, layers - 1);
    bool add = (dir == 1) ? (ask <= lastPrice - step) : (bid >= lastPrice + step);
    if(!add) return;
 
-   double lot = LayerLot(layers);
-   if(!MarginOK(dir, lot)) { Print("Margin kam - DCA layer skip."); return; }
-   if(Open(dir, lot, "L" + IntegerToString(layers + 1)))
-      PrintFormat("DCA layer %d added @ %.2f, lot %.2f", layers + 1, dir == 1 ? ask : bid, lot);
+   double lot = LayerLot(e, layers);
+   if(!MarginOK(dir, lot)) { PrintFormat("[%s] Margin kam - DCA layer skip.", e.name); return; }
+   if(Open(e, dir, lot, "L" + IntegerToString(layers + 1)))
+      PrintFormat("[%s] DCA layer %d @ %.2f, lot %.2f", e.name, layers + 1, dir == 1 ? ask : bid, lot);
   }
 
-void CloseBasket()
+void CloseBasket(Engine &e)
   {
+   trade.SetExpertMagicNumber(e.magic);
    for(int pass = 0; pass < 3; pass++)
      {
       for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
          ulong t = PositionGetTicket(i);
          if(t == 0) continue;
-         if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagic)
-            trade.PositionClose(t);
+         if(IsMine(e)) trade.PositionClose(t);
         }
-      if(CountLayers() == 0) break;
+      if(CountLayers(e) == 0) break;
      }
-   lastCloseTime = TimeCurrent();
-   syncedTP = 0; syncedSL = 0; syncedLayers = 0;
-   basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
+   e.lastCloseTime = TimeCurrent();
+   e.syncedTP = 0; e.syncedSL = 0; e.syncedLayers = 0;
+   e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
   }
 
 //==================== ENTRY ====================
-void TryNewBasket()
+void TryNewBasket(Engine &e, int k)
   {
-   // Pending day reset (pichle din ka basket ab close ho gaya)
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
-   if(dt.year * 1000 + dt.day_of_year != dayKey) ResetDay();
-
    if(dayStopped) return;
    if(InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct) return;
-   if(basketsToday >= InpMaxBasketsPerDay) return;
-   if(TimeCurrent() - lastCloseTime < InpCooldownMin * 60) return;
+   if(e.basketsToday >= e.maxBaskets) return;
+   if(TimeCurrent() - e.lastCloseTime < e.cooldownMin * 60) return;
    if(InpUseNews && (newsActive || newsSoon)) return;
    if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > InpMaxSpreadPoints) return;
    if(InpUseSession && (dt.hour < InpSessionStart || dt.hour >= InpSessionEnd)) return;
    if(InpFridayStop && dt.day_of_week == 5 && dt.hour >= 20) return;
 
-   datetime bar = iTime(_Symbol, InpSignalTF, 0);
-   if(bar == 0 || bar == lastSigBar) return;
+   datetime bar = iTime(_Symbol, e.sigTF, 0);
+   if(bar == 0 || bar == e.lastSigBar) return;
+   e.lastSigBar = bar;
 
-   int sig = Signal();
-   lastSigBar = bar;
+   int sig = Signal(e);
    if(sig == 0) return;
    if(sig == 1 && !InpAllowBuy) return;
    if(sig == -1 && !InpAllowSell) return;
 
+   // Doosre engine ka basket ulti direction me ho to skip
+   if(InpNoOpposite)
+     {
+      int od, ol; double oa, olots, olp, opr;
+      GetBasket(E[1 - k], od, ol, oa, olots, olp, opr);
+      if(ol > 0 && od != sig) return;
+     }
+
    if(InpUseSRFilter && SRBlocked(sig)) return;
 
-   double lot = LayerLot(0);
+   double lot = LayerLot(e, 0);
    if(!MarginOK(sig, lot)) return;
-   basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
-   if(Open(sig, lot, "L1"))
+   e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(Open(e, sig, lot, "L1"))
      {
-      basketsToday++;
-      PrintFormat("New %s basket, lot %.2f", sig == 1 ? "BUY" : "SELL", lot);
+      e.basketsToday++;
+      PrintFormat("[%s] New %s basket, lot %.2f", e.name, sig == 1 ? "BUY" : "SELL", lot);
      }
   }
 
@@ -367,41 +448,42 @@ bool Buf(int h, int start, int count, double &a[])
    return CopyBuffer(h, 0, start, count, a) == count;
   }
 
-int TrendDir()
+int TrendDir(int hf, int hs, ENUM_TIMEFRAMES tf)
   {
    double f[], s[];
-   if(!Buf(hTF, 1, 1, f) || !Buf(hTS, 1, 1, s)) return 0;
-   double c = iClose(_Symbol, InpTrendTF, 1);
+   if(!Buf(hf, 1, 1, f) || !Buf(hs, 1, 1, s)) return 0;
+   double c = iClose(_Symbol, tf, 1);
    if(f[0] > s[0] && c > f[0]) return 1;
    if(f[0] < s[0] && c < f[0]) return -1;
    return 0;
   }
 
-int Signal()
+int MasterTrend() { return TrendDir(hMF, hMS, InpMasterTF); }
+
+int Signal(Engine &e)
   {
-   int trend = TrendDir();
-   if(trend == 0) return 0;
+   int trend = TrendDir(e.hTF, e.hTS, e.trendTF);
+   if(trend == 0 || trend != MasterTrend()) return 0;   // engine trend + master trend dono same
 
    double f[], s[], r[], a[];
-   if(!Buf(hSF, 1, 2, f) || !Buf(hSS, 1, 2, s) || !Buf(hRSI, 1, 1, r) || !Buf(hATR, 1, 1, a)) return 0;
-   if(InpMaxATRPrice > 0 && a[0] > InpMaxATRPrice) return 0; // bahut volatile
-   if(InpMinATRPrice > 0 && a[0] < InpMinATRPrice) return 0; // market dead
+   if(!Buf(e.hSF, 1, 2, f) || !Buf(e.hSS, 1, 2, s) || !Buf(e.hRSI, 1, 1, r) || !Buf(e.hATR, 1, 1, a)) return 0;
+   if(e.maxATR > 0 && a[0] > e.maxATR) return 0;   // bahut volatile
+   if(e.minATR > 0 && a[0] < e.minATR) return 0;   // market dead
 
    if(InpUseMACD)
      {
       double mm[], ms[];
       ArraySetAsSeries(mm, true); ArraySetAsSeries(ms, true);
-      if(CopyBuffer(hMACD, 0, 1, 2, mm) != 2 || CopyBuffer(hMACD, 1, 1, 2, ms) != 2) return 0;
-      double h0 = mm[0] - ms[0], h1 = mm[1] - ms[1];      // histogram bar1, bar2
+      if(CopyBuffer(e.hMACD, 0, 1, 2, mm) != 2 || CopyBuffer(e.hMACD, 1, 1, 2, ms) != 2) return 0;
+      double h0 = mm[0] - ms[0], h1 = mm[1] - ms[1];
       bool macdBuy  = (mm[0] > ms[0]) && (h0 >= h1) && (!InpMACDZeroLine || mm[0] > 0);
       bool macdSell = (mm[0] < ms[0]) && (h0 <= h1) && (!InpMACDZeroLine || mm[0] < 0);
       if(trend == 1 && !macdBuy) return 0;
       if(trend == -1 && !macdSell) return 0;
      }
 
-   double c = iClose(_Symbol, InpSignalTF, 1);
-   double o = iOpen(_Symbol, InpSignalTF, 1);
-
+   double c = iClose(_Symbol, e.sigTF, 1);
+   double o = iOpen(_Symbol, e.sigTF, 1);
    if(trend == 1 && f[0] > s[0] && c > f[0] && c > o && r[0] >= InpRSIBuyMin && r[0] <= InpRSIBuyMax)
       return 1;
    if(trend == -1 && f[0] < s[0] && c < f[0] && c < o && r[0] >= InpRSISellMin && r[0] <= InpRSISellMax)
@@ -410,18 +492,24 @@ int Signal()
   }
 
 //==================== AUTO TP / SL ====================
-double TPDist()
+double SigATR(Engine &e)
   {
-   if(InpTPMode == TP_ATR)
-     {
-      double a[];
-      if(Buf(hATR, 1, 1, a) && a[0] > 0) return MathMax(a[0] * InpTP_ATRMult, InpTPMinPrice);
-     }
-   return InpTPPrice;
+   double a[];
+   if(Buf(e.hATR, 1, 1, a)) return a[0];
+   return 0;
   }
 
-// Sab layers par ek hi TP (average +/- TP) aur ek hi SL (hard stop price)
-void SyncSLTP(int dir, int layers, double avg)
+double TPDist(Engine &e)
+  {
+   if(e.tpMode == TP_ATR)
+     {
+      double a = SigATR(e);
+      if(a > 0) return MathMax(a * e.tpATR, e.tpMin);
+     }
+   return e.tp;
+  }
+
+void SyncSLTP(Engine &e, int dir, int layers, double avg)
   {
    int    digits  = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    double minStop = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point + 5 * _Point;
@@ -431,28 +519,23 @@ void SyncSLTP(int dir, int layers, double avg)
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(PositionGetTicket(i) == 0) continue;
-      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagic)
-         totalLots += PositionGetDouble(POSITION_VOLUME);
+      if(IsMine(e)) totalLots += PositionGetDouble(POSITION_VOLUME);
      }
    if(totalLots <= 0) return;
 
-   double tp = NormalizeDouble(dir == 1 ? avg + TPDist() : avg - TPDist(), digits);
-
-   // SL = wo price jahan basket loss = InpBasketStopPct (current lots ke hisaab se)
+   double tp = NormalizeDouble(dir == 1 ? avg + TPDist(e) : avg - TPDist(e), digits);
    double sl = 0;
-   if(InpBasketStopPct > 0 && basketStartEq > 0)
+   if(e.stopPct > 0 && e.basketStartEq > 0)
      {
-      double perDollar = 0; // 1 lot, $1 move ka money
+      double perDollar = 0;
       ENUM_ORDER_TYPE ot = dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
       if(OrderCalcProfit(ot, _Symbol, 1.0, avg, dir == 1 ? avg + 1.0 : avg - 1.0, perDollar) && perDollar > 0)
         {
-         double allowLoss = basketStartEq * InpBasketStopPct / 100.0;
-         double dist = allowLoss / (totalLots * perDollar);
+         double dist = (e.basketStartEq * e.stopPct / 100.0) / (totalLots * perDollar);
          sl = NormalizeDouble(dir == 1 ? avg - dist : avg + dist, digits);
         }
      }
 
-   // stop-level validation
    if(dir == 1)
      {
       if(tp - ask < minStop) tp = 0;
@@ -464,30 +547,31 @@ void SyncSLTP(int dir, int layers, double avg)
       if(sl > 0 && sl - ask < minStop) sl = 0;
      }
 
-   bool changed = (layers != syncedLayers) || MathAbs(tp - syncedTP) > 50 * _Point || MathAbs(sl - syncedSL) > 50 * _Point;
+   bool changed = (layers != e.syncedLayers) || MathAbs(tp - e.syncedTP) > 50 * _Point || MathAbs(sl - e.syncedSL) > 50 * _Point;
    if(!changed) return;
 
+   trade.SetExpertMagicNumber(e.magic);
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       ulong t = PositionGetTicket(i);
       if(t == 0) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      if(!IsMine(e)) continue;
       double curSL = PositionGetDouble(POSITION_SL), curTP = PositionGetDouble(POSITION_TP);
       if(MathAbs(curSL - sl) < _Point && MathAbs(curTP - tp) < _Point) continue;
       trade.PositionModify(t, sl, tp);
      }
-   syncedTP = tp; syncedSL = sl; syncedLayers = layers;
+   e.syncedTP = tp; e.syncedSL = sl; e.syncedLayers = layers;
   }
 
 //==================== HELPERS ====================
-double BaseStep()
+double BaseStep(Engine &e)
   {
-   if(InpStepMode == STEP_ATR)
+   if(e.stepMode == STEP_ATR)
      {
-      double a[];
-      if(Buf(hATR, 1, 1, a) && a[0] > 0) return a[0] * InpStepATRMult;
+      double a = SigATR(e);
+      if(a > 0) return a * e.stepATR;
      }
-   return InpStepPrice;
+   return e.step;
   }
 
 double NormLot(double lot)
@@ -501,13 +585,13 @@ double NormLot(double lot)
    return NormalizeDouble(lot, 2);
   }
 
-double LayerLot(int layerIndex)
+double LayerLot(Engine &e, int layerIndex)
   {
    double base = InpFixedLot;
    if(InpLotMode == LOT_AUTO && InpBalancePerLot > 0)
       base = 0.01 * MathFloor(AccountInfoDouble(ACCOUNT_BALANCE) / InpBalancePerLot);
    if(base <= 0) base = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   return NormLot(base * MathPow(InpLotMultiplier, layerIndex));
+   return NormLot(base * e.lotFactor * MathPow(e.lotMult, layerIndex));
   }
 
 bool MarginOK(int dir, double lot)
@@ -518,17 +602,18 @@ bool MarginOK(int dir, double lot)
    return (AccountInfoDouble(ACCOUNT_MARGIN_FREE) - m) > AccountInfoDouble(ACCOUNT_EQUITY) * 0.3;
   }
 
-bool Open(int dir, double lot, string tag)
+bool Open(Engine &e, int dir, double lot, string tag)
   {
-   bool ok = (dir == 1) ? trade.Buy(lot, _Symbol, 0, 0, 0, InpComment + "_" + tag)
-                        : trade.Sell(lot, _Symbol, 0, 0, 0, InpComment + "_" + tag);
+   trade.SetExpertMagicNumber(e.magic);
+   string cm = InpComment + "_" + (e.magic == InpMagic + 1 ? "SC" : "IN") + "_" + tag;
+   bool ok = (dir == 1) ? trade.Buy(lot, _Symbol, 0, 0, 0, cm) : trade.Sell(lot, _Symbol, 0, 0, 0, cm);
    if(ok && (trade.ResultRetcode() == TRADE_RETCODE_DONE || trade.ResultRetcode() == TRADE_RETCODE_PLACED))
      {
-      lastLayerTime = TimeCurrent();
-      tradesToday++;
+      e.lastLayerTime = TimeCurrent();
+      e.tradesToday++;
       return true;
      }
-   PrintFormat("Order fail: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+   PrintFormat("[%s] Order fail: %d %s", e.name, trade.ResultRetcode(), trade.ResultRetcodeDescription());
    return false;
   }
 
@@ -714,26 +799,35 @@ void UpdateNews()
   }
 
 //==================== PANEL ====================
+string EngineLine(Engine &e)
+  {
+   if(!e.on && CountLayers(e) == 0) return e.name + "   : OFF";
+   int d, layers; double avg, lots, lp, pr;
+   GetBasket(e, d, layers, avg, lots, lp, pr);
+   int tr = TrendDir(e.hTF, e.hTS, e.trendTF);
+   return StringFormat("%-8s: trend %s | %s %d/%d lots %.2f avg %.2f P/L %.2f | TP %.2f SL %.2f | today %d baskets",
+                       e.name, tr == 1 ? "UP" : (tr == -1 ? "DOWN" : "SIDE"),
+                       d == 1 ? "BUY" : (d == -1 ? "SELL" : "-"), layers, e.maxLayers, lots, avg, pr,
+                       e.syncedTP, e.syncedSL, e.basketsToday);
+  }
+
 void ShowPanel()
   {
    if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) return;
-   int d; double avg, lots, lp, pr; int layers;
-   GetBasket(d, layers, avg, lots, lp, pr);
+   int mt = MasterTrend();
+   string status = dayStopped ? "STOPPED (daily loss)" :
+                   (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "Daily target hit" : "Running");
    Comment(StringFormat(
-      "GoldDCA_EA v1.21 | %s\n"
-      "Status      : %s\n"
-      "Trend (%s)  : %s\n"
-      "News        : %s\n"
-      "Basket      : %s  layers %d/%d  lots %.2f\n"
-      "Avg price   : %.2f   Basket P/L: %.2f\n"
-      "Auto TP/SL  : %.2f / %.2f\n"
-      "Today P/L   : %.2f%%  (target %.1f%%, max loss %.1f%%)\n"
-      "Today       : %d baskets, %d trades",
-      _Symbol,
-      dayStopped ? "STOPPED (daily loss)" : (DayPLPct() >= InpDailyTargetPct && InpDailyTargetPct > 0 ? "Daily target hit" : "Running"),
-      EnumToString(InpTrendTF), TrendDir() == 1 ? "UP" : (TrendDir() == -1 ? "DOWN" : "SIDEWAYS - no entry"),
+      "GoldDCA_EA v2.00 (Scalp + Intraday) | %s\n"
+      "Status    : %s\n"
+      "Master %s : %s\n"
+      "News      : %s\n"
+      "%s\n%s\n"
+      "Today P/L : %.2f%%  (target %.1f%%, max loss %.1f%%)  trades %d",
+      _Symbol, status, EnumToString(InpMasterTF),
+      mt == 1 ? "UP - sirf BUY" : (mt == -1 ? "DOWN - sirf SELL" : "SIDEWAYS - no entry"),
       newsActive ? "HIGH IMPACT - paused" : "Clear",
-      d == 1 ? "BUY" : (d == -1 ? "SELL" : "-"), layers, InpMaxLayers, lots,
-      avg, pr, syncedTP, syncedSL, DayPLPct(), InpDailyTargetPct, InpDailyLossPct, basketsToday, tradesToday));
+      EngineLine(E[0]), EngineLine(E[1]),
+      DayPLPct(), InpDailyTargetPct, InpDailyLossPct, E[0].tradesToday + E[1].tradesToday));
   }
 //+------------------------------------------------------------------+
