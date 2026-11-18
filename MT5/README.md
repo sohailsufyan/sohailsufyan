@@ -44,7 +44,9 @@
 
 - **Entry:** H1 trend (EMA50/200) ki direction me, M15 par EMA9 > EMA21 + RSI confirm
 - **DCA:** Price $7 against jaye to naya layer (lot x1.3, gap x1.2), max 6 layers
-- **Exit:** Average price se $2 profit par poora basket close
+- **Confirm:** MACD (line > signal, histogram badh raha, zero line ke sahi side) + ATR filter (bahut volatile ya dead market me entry nahi)
+- **Exit:** Average price se 0.5 x ATR (min $1.5) profit par poora basket close
+- **Auto TP/SL:** Har layer par broker-side common TP (basket target) aur SL (hard stop price) lagta hai, har naye layer par update
 - **Daily:** 5% target hit → naye basket band; 15% daily loss → sab close
 - **Hard stop:** Basket loss equity ka 15% → sab close (isko OFF mat karein)
 - **News:** High-impact USD news se 30 min pehle/baad naya trade/DCA nahi, pehle profit me ho to close
