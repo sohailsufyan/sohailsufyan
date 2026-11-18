@@ -9,7 +9,7 @@
 //|  against ho to bada loss ho sakta hai. Basket stop OFF mat karein|
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "1.20"
+#property version   "1.21"
 
 #include <Trade/Trade.mqh>
 
@@ -94,7 +94,9 @@ input bool            InpShowD            = true;         // Previous Day O/H/L/
 input bool            InpShowH4           = true;         // Last H4 candles O/H/L/C
 input int             InpH4Count          = 5;            // Kitne H4 candles
 input bool            InpDrawZones        = true;         // Y/6M/3M/1M/W levels par zone (box)
-input double          InpZoneHalf         = 1.0;          // Zone half-width ($)
+input double          InpZoneHalf         = 1.0;          // Zone half-width ($) - Y/6M/3M/1M/W
+input bool            InpDrawSmallZones   = true;         // 3D / D / H4 levels par bhi zone (box)
+input double          InpZoneHalfSmall    = 0.5;          // Zone half-width ($) - 3D/D/H4
 input color           InpZoneColor        = C'45,45,70';  // Zone color
 input bool            InpUseSRFilter      = true;         // S/R ke paas against-direction entry block
 input double          InpSRBlockDist      = 3.0;          // BUY: resistance itne $ upar ho to skip (SELL ulta)
@@ -566,7 +568,7 @@ void AddLevel(double price, int rank, string tag)
    levels[n].price = price; levels[n].rank = rank; levels[n].tag = tag;
   }
 
-void DrawLine(string id, datetime t1, double price, color clr, int width, ENUM_LINE_STYLE style, string label, bool zone, datetime t2)
+void DrawLine(string id, datetime t1, double price, color clr, int width, ENUM_LINE_STYLE style, string label, double zone, datetime t2)
   {
    string n = SRPFX + id;
    if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_TREND, 0, t1, price, t2, price);
@@ -588,11 +590,11 @@ void DrawLine(string id, datetime t1, double price, color clr, int width, ENUM_L
    ObjectSetInteger(0, t, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
    ObjectSetInteger(0, t, OBJPROP_SELECTABLE, false);
 
-   if(zone && InpDrawZones && InpZoneHalf > 0)
+   if(zone > 0)
      {
       string z = n + "_Z";
-      if(ObjectFind(0, z) < 0) ObjectCreate(0, z, OBJ_RECTANGLE, 0, t1, price + InpZoneHalf, t2, price - InpZoneHalf);
-      else { ObjectMove(0, z, 0, t1, price + InpZoneHalf); ObjectMove(0, z, 1, t2, price - InpZoneHalf); }
+      if(ObjectFind(0, z) < 0) ObjectCreate(0, z, OBJ_RECTANGLE, 0, t1, price + zone, t2, price - zone);
+      else { ObjectMove(0, z, 0, t1, price + zone); ObjectMove(0, z, 1, t2, price - zone); }
       ObjectSetInteger(0, z, OBJPROP_COLOR, InpZoneColor);
       ObjectSetInteger(0, z, OBJPROP_FILL, true);
       ObjectSetInteger(0, z, OBJPROP_BACK, true);
@@ -601,11 +603,12 @@ void DrawLine(string id, datetime t1, double price, color clr, int width, ENUM_L
   }
 
 void AddOHLC(string name, int rank, bool show, double o, double h, double l, double c, datetime t0,
-             color clr, int width, ENUM_LINE_STYLE style, bool zone, datetime t2)
+             color clr, int width, ENUM_LINE_STYLE style, bool big, datetime t2)
   {
    AddLevel(o, rank, name + "-O"); AddLevel(h, rank, name + "-H");
    AddLevel(l, rank, name + "-L"); AddLevel(c, rank, name + "-C");
    if(!InpShowLevels || !show) return;
+   double zone = big ? (InpDrawZones ? InpZoneHalf : 0) : (InpDrawSmallZones ? InpZoneHalfSmall : 0);
    DrawLine(name + "_O", t0, o, clr, width, style, name + " Open",  zone, t2);
    DrawLine(name + "_H", t0, h, clr, width, style, name + " High",  zone, t2);
    DrawLine(name + "_L", t0, l, clr, width, style, name + " Low",   zone, t2);
@@ -717,7 +720,7 @@ void ShowPanel()
    int d; double avg, lots, lp, pr; int layers;
    GetBasket(d, layers, avg, lots, lp, pr);
    Comment(StringFormat(
-      "GoldDCA_EA v1.20 | %s\n"
+      "GoldDCA_EA v1.21 | %s\n"
       "Status      : %s\n"
       "Trend (%s)  : %s\n"
       "News        : %s\n"
