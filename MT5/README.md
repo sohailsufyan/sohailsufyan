@@ -37,3 +37,16 @@
 3. Kam se kam 1 mahina demo, phir chhote real account se start
 
 > Disclaimer: Ye educational tool hai, financial advice nahi. Past performance future ki guarantee nahi.
+
+---
+
+# GoldDCA_EA – Trend DCA EA (XAUUSD)
+
+- **Entry:** H1 trend (EMA50/200) ki direction me, M15 par EMA9 > EMA21 + RSI confirm
+- **DCA:** Price $7 against jaye to naya layer (lot x1.3, gap x1.2), max 6 layers
+- **Exit:** Average price se $2 profit par poora basket close
+- **Daily:** 5% target hit → naye basket band; 15% daily loss → sab close
+- **Hard stop:** Basket loss equity ka 15% → sab close (isko OFF mat karein)
+- **News:** High-impact USD news se 30 min pehle/baad naya trade/DCA nahi, pehle profit me ho to close
+  (sirf live/demo me kaam karta hai, Strategy Tester me MT5 calendar nahi hota)
+- **Account:** Hedging account zaroori
