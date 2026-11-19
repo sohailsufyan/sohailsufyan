@@ -176,3 +176,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Scalp entry sirf London + New York session (`InpSxSessionOnly`)
 - Optional time exit: basket `InpSxMaxMinutes` se purana to +$0.2 par bahar (default off)
 - Intraday ke exit pehle jaise: +$3 / +$1 / $2 / +$5
+- v3.91: pehla order **6 lot**, har DCA layer par **+0.1 lot** (6.0, 6.1, 6.2 ...) – `InpFixedLot`, `InpLotAddLots`; max lot per layer 100

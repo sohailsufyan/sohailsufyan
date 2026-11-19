@@ -1,5 +1,5 @@
 ; GoldDCA_EA v2.60 - recommended settings
-InpLotMode=1
+InpLotMode=0
 InpBalancePerLot=2000
 InpLotProgression=1
 InpLotAddFactor=0.5
@@ -62,3 +62,7 @@ InpSxBackupArm=1.0
 InpSxBackupExit=0.3
 InpSxSessionOnly=true
 InpSxMaxMinutes=0
+InpFixedLot=6
+InpLotAddLots=0.1
+InpMaxLot=100
+InpEliteLotMult=1.0
