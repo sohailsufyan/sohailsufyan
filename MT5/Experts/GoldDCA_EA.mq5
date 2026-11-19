@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.30"
+#property version   "2.40"
 
 #include <Trade/Trade.mqh>
 
@@ -44,9 +44,9 @@ input ENUM_TIMEFRAMES InpScTrendTF        = PERIOD_M15;       // Scalp trend TF
 input double          InpScLotFactor      = 1.0;              // Scalp first lot x base lot
 input double          InpScLotMult        = 1.2;              // Scalp DCA lot multiplier
 input ENUM_STEP_MODE  InpScStepMode       = STEP_FIXED_PRICE; // Scalp step mode
-input double          InpScStep           = 4.0;              // Scalp DCA step ($)
+input double          InpScStep           = 7.0;              // Scalp DCA step ($)
 input double          InpScStepATR        = 1.0;              // Scalp step ATR x (ATR mode)
-input double          InpScStepGrowth     = 1.2;              // Scalp step growth
+input double          InpScStepGrowth     = 1.0;              // Scalp step growth (1.0 = har layer $7)
 input int             InpScMaxLayers      = 4;                // Scalp max layers
 input ENUM_TP_MODE    InpScTPMode         = TP_ATR;           // Scalp TP mode
 input double          InpScTP             = 1.0;              // Scalp fixed TP ($ from average)
@@ -67,7 +67,7 @@ input double          InpInLotMult        = 1.3;              // Intraday DCA lo
 input ENUM_STEP_MODE  InpInStepMode       = STEP_FIXED_PRICE; // Intraday step mode
 input double          InpInStep           = 7.0;              // Intraday DCA step ($)
 input double          InpInStepATR        = 1.0;              // Intraday step ATR x (ATR mode)
-input double          InpInStepGrowth     = 1.2;              // Intraday step growth
+input double          InpInStepGrowth     = 1.0;              // Intraday step growth (1.0 = har layer $7)
 input int             InpInMaxLayers      = 6;                // Intraday max layers
 input ENUM_TP_MODE    InpInTPMode         = TP_ATR;           // Intraday TP mode
 input double          InpInTP             = 2.0;              // Intraday fixed TP ($ from average)
@@ -92,9 +92,9 @@ input bool            InpTkUseMACD        = false;            // Tick engine par
 input double          InpTkLotFactor      = 1.0;              // Tick first lot x base lot
 input double          InpTkLotMult        = 1.2;              // Tick DCA lot multiplier
 input ENUM_STEP_MODE  InpTkStepMode       = STEP_FIXED_PRICE; // Tick step mode
-input double          InpTkStep           = 2.0;              // Tick DCA step ($)
+input double          InpTkStep           = 7.0;              // Tick DCA step ($)
 input double          InpTkStepATR        = 1.5;              // Tick step ATR x (ATR mode)
-input double          InpTkStepGrowth     = 1.3;              // Tick step growth
+input double          InpTkStepGrowth     = 1.0;              // Tick step growth (1.0 = har layer $7)
 input int             InpTkMaxLayers      = 3;                // Tick max layers
 input ENUM_TP_MODE    InpTkTPMode         = TP_ATR;           // Tick TP mode
 input double          InpTkTP             = 0.5;              // Tick fixed TP ($ from average)
@@ -117,6 +117,15 @@ input bool            InpBasketTrail      = true;         // TP par close ki jag
 input double          InpTrailLockPct     = 50.0;         // Trailing start par TP ka itna % lock
 input double          InpTrailDistMult    = 1.0;          // Trailing distance = TP distance x ye
 input double          InpTrailStep        = 0.3;          // SL kam se kam itna $ move ho tab update
+input double          InpBookPct          = 50.0;         // TP aate hi basket ka itna % volume book (0 = off), baaki trailing
+
+input group "=== Signal Panel ==="
+input bool            InpGraphicPanel     = true;         // Graphic signal panel (false = simple text)
+input int             InpPanelX           = 10;           // Panel X (px)
+input int             InpPanelY           = 25;           // Panel Y (px)
+input bool            InpAlertPopup       = true;         // Naya HIGH signal: MT5 popup alert
+input bool            InpAlertPush        = true;         // Naya HIGH signal: phone push (MT5 app)
+input int             InpAlertGapMin      = 15;           // Do alerts ke beech min gap (minutes)
 
 input group "=== Cutloss ($) ==="
 input double          InpCutlossUSD       = 0.0;          // Dono engine ka floating loss itna $ ho to sab close (0 = off)
@@ -218,7 +227,7 @@ struct Engine
    double            basketStartEq, syncedTP, syncedSL;
    int               syncedLayers, basketsToday, tradesToday;
    datetime          lastLayerBar;
-   bool              trailActive, manual;
+   bool              trailActive, manual, booked;
    double            trailSL;
    int               adoptDir;
   };
@@ -251,6 +260,7 @@ struct SRLevel { double price; int rank; string tag; };
 SRLevel  levels[];
 datetime lastLevelsBar = 0, lastLevelsTry = 0;
 #define  SRPFX "GDCA_SR_"
+#define  PFX   "GDCA_P_"
 
 bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES sig, ENUM_TIMEFRAMES tr,
                  double lotF, double lotM, int stepMode, double step, double stepATR, double growth, int layers,
@@ -266,7 +276,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    if(!on) return true;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -328,11 +338,19 @@ int OnInit()
 
    ResetDay();
    UpdateLevels(true);
+   EventSetTimer(1);
    return(INIT_SUCCEEDED);
+  }
+
+void OnTimer()
+  {
+   ShowPanel();
   }
 
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
+   ObjectsDeleteAll(0, PFX);
    IndicatorRelease(hMF); IndicatorRelease(hMS);
    for(int k = 0; k < NE; k++) ReleaseEngine(E[k]);
    for(int i = 0; i < 5; i++) { IndicatorRelease(hScF[i]); IndicatorRelease(hScS[i]); }
@@ -498,6 +516,7 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
          double lock = tpDist * InpTrailLockPct / 100.0;
          e.trailSL = (dir == 1) ? avg + lock : avg - lock;
          PrintFormat("[%s] Trailing shuru, SL lock %.2f", e.name, e.trailSL);
+         if(InpBookPct > 0) BookPartial(e, InpBookPct);
         }
       if(e.trailActive)
         {
@@ -566,7 +585,7 @@ void CloseBasket(Engine &e)
      }
    e.lastCloseTime = TimeCurrent();
    e.syncedTP = 0; e.syncedSL = 0; e.syncedLayers = 0;
-   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0;
+   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0; e.booked = false;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
   }
 
@@ -871,6 +890,50 @@ string ScoreText(ScoreResult &r)
   {
    return StringFormat("[MTF %d/25 MOM %d/15 VOL %d/10 SES %d/10 LIQ %d/15 FLOW %d/15 X %d/10]",
                        r.mtf, r.mom, r.vol, r.ses, r.liq, r.flow, r.cross);
+  }
+
+//==================== 50% BOOKING ====================
+// TP par basket ka pct% volume close karo (pehle poori chhoti positions, phir partial)
+void BookPartial(Engine &e, double pct)
+  {
+   ulong  tk[]; double vl[];
+   double total = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || !IsMine(e)) continue;
+      int n = ArraySize(tk);
+      ArrayResize(tk, n + 1); ArrayResize(vl, n + 1);
+      tk[n] = t; vl[n] = PositionGetDouble(POSITION_VOLUME);
+      total += vl[n];
+     }
+   double target = total * pct / 100.0;
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double stepL  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(stepL <= 0) stepL = 0.01;
+   double closed = 0;
+   trade.SetExpertMagicNumber(e.magic);
+   for(int i = 0; i < ArraySize(tk) && closed < target - 1e-9; i++)
+     {
+      double remain = target - closed;
+      if(vl[i] <= remain + 1e-9)
+        {
+         if(trade.PositionClose(tk[i])) closed += vl[i];
+        }
+      else
+        {
+         double part = MathFloor(remain / stepL + 1e-9) * stepL;
+         if(part >= minLot && vl[i] - part >= minLot - 1e-9)
+           {
+            if(trade.PositionClosePartial(tk[i], NormalizeDouble(part, 2))) closed += part;
+           }
+        }
+     }
+   e.booked = closed > 0;
+   if(closed > 0)
+      PrintFormat("[%s] Profit booked: %.2f / %.2f lots (%.0f%%), baaki trailing SL par", e.name, closed, total, pct);
+   else
+      PrintFormat("[%s] Lot itna chhota hai ki %.0f%% book nahi ho sakta - poora basket trailing par", e.name, pct);
   }
 
 //==================== CUTLOSS ($) ====================
@@ -1346,9 +1409,8 @@ string EngineLine(Engine &e)
                        e.manual ? " | manual ON" : "");
   }
 
-void ShowPanel()
+void ShowTextPanel()
   {
-   if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) return;
    int mt = MasterTrend();
    string status = dayStopped ? "STOPPED (daily loss / cutloss)" :
                    (TimeCurrent() < cutlossUntil ? "CUTLOSS cooldown till " + TimeToString(cutlossUntil, TIME_MINUTES) :
@@ -1363,7 +1425,7 @@ void ShowPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.30 (Scalp + Intraday + Tick M1 + Scanner) | %s\n"
+      "GoldDCA_EA v2.40 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1376,5 +1438,250 @@ void ShowPanel()
       scanLine,
       EngineLine(E[0]), EngineLine(E[1]), EngineLine(E[2]),
       DayPLPct(), InpDailyTargetPct, InpDailyLossPct, E[0].tradesToday + E[1].tradesToday + E[2].tradesToday));
+  }
+//+------------------------------------------------------------------+
+
+//==================== GRAPHIC SIGNAL PANEL ====================
+color    cBg = C'18,20,32', cCard = C'28,31,48', cLine = C'48,52,78', cTxt = C'225,228,240', cDim = C'140,146,175';
+color    cBuy = C'38,196,133', cSell = C'239,83,80', cWarn = C'255,183,77', cAcc = C'124,108,255';
+datetime lastPanel = 0, lastAlertTime = 0;
+int      lastAlertDir = 0;
+bool     prevHigh = false;
+
+void PRect(string id, int x, int y, int w, int h, color bg, color border)
+  {
+   string n = PFX + id;
+   if(ObjectFind(0, n) < 0)
+     {
+      ObjectCreate(0, n, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, n, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, n, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, n, OBJPROP_BACK, false);
+     }
+   ObjectSetInteger(0, n, OBJPROP_XDISTANCE, InpPanelX + x);
+   ObjectSetInteger(0, n, OBJPROP_YDISTANCE, InpPanelY + y);
+   ObjectSetInteger(0, n, OBJPROP_XSIZE, MathMax(w, 1));
+   ObjectSetInteger(0, n, OBJPROP_YSIZE, MathMax(h, 1));
+   ObjectSetInteger(0, n, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, n, OBJPROP_COLOR, border);
+  }
+
+void PText(string id, int x, int y, string txt, color c, int size = 9, bool bold = false, ENUM_ANCHOR_POINT anc = ANCHOR_LEFT_UPPER)
+  {
+   string n = PFX + id;
+   if(ObjectFind(0, n) < 0)
+     {
+      ObjectCreate(0, n, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, n, OBJPROP_HIDDEN, true);
+     }
+   ObjectSetInteger(0, n, OBJPROP_XDISTANCE, InpPanelX + x);
+   ObjectSetInteger(0, n, OBJPROP_YDISTANCE, InpPanelY + y);
+   ObjectSetInteger(0, n, OBJPROP_ANCHOR, anc);
+   ObjectSetString(0, n, OBJPROP_TEXT, txt);
+   ObjectSetString(0, n, OBJPROP_FONT, bold ? "Segoe UI Semibold" : "Segoe UI");
+   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, size);
+   ObjectSetInteger(0, n, OBJPROP_COLOR, c);
+  }
+
+void PBar(string id, int x, int y, int w, int h, double frac, color fg)
+  {
+   frac = MathMax(0.0, MathMin(1.0, frac));
+   PRect(id + "_bg", x, y, w, h, cLine, cLine);
+   PRect(id + "_fg", x, y, (int)MathRound(w * frac), h, fg, fg);
+  }
+
+string SessionNow(int &nextHourGMT)
+  {
+   MqlDateTime g;
+   TimeToStruct(TimeCurrent() - InpServerGMTOffset * 3600, g);
+   int h = g.hour;
+   bool asia = (h >= 0 && h < 9), lon = (h >= 7 && h < 16), ny = (h >= 12 && h < 21);
+   int opens[3] = {0, 7, 12};
+   nextHourGMT = 0;
+   for(int i = 0; i < 3; i++) if(opens[i] > h) { nextHourGMT = opens[i]; break; }
+   if(lon && ny) return "LONDON + NEW YORK";
+   if(lon && asia) return "ASIA + LONDON";
+   if(lon) return "LONDON";
+   if(ny) return "NEW YORK";
+   if(asia) return "ASIA";
+   return "OFF-HOURS";
+  }
+
+string ISTTime(int gmtHour)
+  {
+   int mins = gmtHour * 60 + 330;          // IST = GMT + 5:30
+   mins %= 1440;
+   return StringFormat("%02d:%02d IST", mins / 60, mins % 60);
+  }
+
+string EngineState(Engine &e, int layers)
+  {
+   if(!e.on && layers == 0) return "OFF";
+   if(layers == 0)
+     {
+      if(dayStopped) return "STOPPED";
+      if(TimeCurrent() < cutlossUntil) return "COOLDOWN";
+      if(InpUseNews && (newsActive || newsSoon)) return "NEWS PAUSE";
+      return "SCANNING";
+     }
+   if(e.trailActive) return e.booked ? "BOOKED + TRAIL" : "TRAILING";
+   if(layers >= e.maxLayers) return "MAX LAYERS";
+   return "DCA ACTIVE";
+  }
+
+void ShowPanel()
+  {
+   if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) return;
+   if(!InpGraphicPanel) { ShowTextPanel(); return; }
+   if(TimeLocal() == lastPanel) return;      // max 1 update / second
+   lastPanel = TimeLocal();
+
+   int W = 360, x0 = 0, y = 0;
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE), eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin = AccountInfoDouble(ACCOUNT_MARGIN);
+   double mlvl = margin > 0 ? eq / margin * 100.0 : 0;
+   static double peakEq = 0;
+   if(eq > peakEq) peakEq = eq;
+   double dd = peakEq > 0 ? (peakEq - eq) / peakEq * 100.0 : 0;
+
+   int mt = MasterTrend();
+   int sd = (mt != 0) ? mt : 1;
+   if(InpUseScanner && (sd != lastScanDir || TimeCurrent() - lastScanTime >= 5))
+     { ScanMarket(sd, lastScan); lastScanDir = sd; lastScanTime = TimeCurrent(); }
+   int score = InpUseScanner ? lastScan.total : 0;
+   bool isHigh = (mt != 0 && score >= InpMinScore);
+
+   // ---- background
+   PRect("bg", x0, 0, W, 520, cBg, cLine);
+
+   // ---- header
+   string status = dayStopped ? "STOPPED" : (TimeCurrent() < cutlossUntil ? "COOLDOWN" :
+                   (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
+   color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
+   PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
+   PText("ver", 12, 27, _Symbol + "  |  v2.40  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PRect("badge", W - 96, 10, 84, 20, stC, stC);
+   PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
+   y = 48;
+
+   // ---- account tiles
+   string tl[4] = {"BALANCE", "EQUITY", "FLOATING", "MARGIN LVL"};
+   double fl = eq - bal;
+   string tv[4];
+   tv[0] = DoubleToString(bal, 2); tv[1] = DoubleToString(eq, 2);
+   tv[2] = (fl >= 0 ? "+" : "") + DoubleToString(fl, 2);
+   tv[3] = margin > 0 ? DoubleToString(mlvl, 0) + "%" : "-";
+   for(int i = 0; i < 4; i++)
+     {
+      int tx = 8 + i * 87;
+      PRect("tile" + IntegerToString(i), tx, y, 82, 40, cCard, cLine);
+      PText("tileL" + IntegerToString(i), tx + 6, y + 4, tl[i], cDim, 7);
+      color vc = (i == 2) ? (fl >= 0 ? cBuy : cSell) : (i == 3 && margin > 0 && mlvl < 200 ? cWarn : cTxt);
+      PText("tileV" + IntegerToString(i), tx + 6, y + 18, tv[i], vc, 10, true);
+     }
+   y += 46;
+   PText("ddL", 10, y, StringFormat("Drawdown %.1f%%", dd), dd > 18 ? cSell : cDim, 8);
+   PBar("dd", 110, y + 4, W - 120, 6, dd / 25.0, dd > 18 ? cSell : (dd > 10 ? cWarn : cBuy));
+   y += 20;
+
+   // ---- signal card
+   PRect("sig", 8, y, W - 16, 150, cCard, isHigh ? (sd == 1 ? cBuy : cSell) : cLine);
+   string dirTxt = (mt == 0) ? "WAIT" : (sd == 1 ? "BUY" : "SELL");
+   color dirC = (mt == 0) ? cDim : (sd == 1 ? cBuy : cSell);
+   PText("sigDir", 18, y + 8, dirTxt, dirC, 22, true);
+   string tier = (mt == 0) ? "SIDEWAYS - no entry" : Tier(score) + (isHigh ? "  |  HIGH PROBABILITY" : "  |  wait for " + IntegerToString(InpMinScore) + "+");
+   PText("sigTier", 18, y + 46, tier, isHigh ? dirC : cWarn, 8, true);
+   PText("sigScore", W - 24, y + 6, IntegerToString(score), isHigh ? dirC : cTxt, 24, true, ANCHOR_RIGHT_UPPER);
+   PText("sigScoreL", W - 24, y + 44, "/100 SCORE", cDim, 7, false, ANCHOR_RIGHT_UPPER);
+   PBar("sigBar", 18, y + 62, W - 52, 6, score / 100.0, score >= InpMinScore ? dirC : (score >= InpMedScore ? cWarn : cSell));
+
+   // trade plan (intraday basket logic)
+   double px = sd == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double atr = B1(hScATR, 0, 1);
+   if(atr == EMPTY_VALUE) atr = 0;
+   double tp1d = MathMax(atr * InpInTP_ATR, InpInTPMin);
+   double tp1 = px + sd * tp1d, tp2 = px + sd * 2.0 * MathMax(atr, tp1d);
+   int ty = y + 76;
+   PText("pE", 18, ty, "ENTRY", cDim, 7);       PText("pEv", 18, ty + 12, DoubleToString(px, _Digits), cTxt, 9, true);
+   PText("pT1", 105, ty, "TP1 (" + DoubleToString(InpBookPct, 0) + "% book)", cDim, 7);
+   PText("pT1v", 105, ty + 12, DoubleToString(tp1, _Digits), cBuy, 9, true);
+   PText("pT2", 225, ty, "TP2 (trailing)", cDim, 7); PText("pT2v", 225, ty + 12, DoubleToString(tp2, _Digits), cBuy, 9, true);
+   string dca = "DCA every $" + DoubleToString(InpInStep, 0) + ": ";
+   for(int i = 1; i <= MathMin(4, InpInMaxLayers - 1); i++)
+      dca += DoubleToString(px - sd * InpInStep * i, 1) + (i < MathMin(4, InpInMaxLayers - 1) ? " | " : "");
+   PText("pDca", 18, ty + 32, dca, cWarn, 8);
+   PText("pSL", 18, ty + 48, StringFormat("Hard stop: basket loss %.0f%% equity%s", InpInStopPct,
+                                           InpCutlossUSD > 0 ? StringFormat(" / $%.0f cutloss", InpCutlossUSD) : ""), cSell, 8);
+   y += 158;
+
+   // ---- score breakdown
+   string nm[7] = {"Trend MTF", "Momentum", "Volatility", "Session", "Liquidity", "Order flow", "Dollar/Silver"};
+   int    vv[7], mx[7] = {25, 15, 10, 10, 15, 15, 10};
+   vv[0] = lastScan.mtf; vv[1] = lastScan.mom; vv[2] = lastScan.vol; vv[3] = lastScan.ses;
+   vv[4] = lastScan.liq; vv[5] = lastScan.flow; vv[6] = lastScan.cross;
+   PText("brkT", 10, y, "SCORE BREAKDOWN", cDim, 7, true);
+   y += 14;
+   for(int i = 0; i < 7; i++)
+     {
+      double f = InpUseScanner ? (double)vv[i] / mx[i] : 0;
+      PText("bn" + IntegerToString(i), 12, y, nm[i], cTxt, 8);
+      PBar("bb" + IntegerToString(i), 105, y + 4, 190, 6, f, f >= 0.66 ? cBuy : (f >= 0.33 ? cWarn : cSell));
+      PText("bv" + IntegerToString(i), W - 14, y, InpUseScanner ? StringFormat("%d/%d", vv[i], mx[i]) : "-", cDim, 8, false, ANCHOR_RIGHT_UPPER);
+      y += 15;
+     }
+   y += 4;
+
+   // ---- session / news
+   int nextH;
+   string ses = SessionNow(nextH);
+   PRect("ses", 8, y, W - 16, 22, cCard, cLine);
+   PText("sesT", 16, y + 4, "Session: " + ses + "   |   next open " + ISTTime(nextH), cTxt, 8);
+   PText("news", W - 16, y + 4, newsActive ? "NEWS!" : "News clear", newsActive ? cSell : cBuy, 8, true, ANCHOR_RIGHT_UPPER);
+   y += 28;
+
+   // ---- engines
+   PText("engT", 10, y, "ENGINES", cDim, 7, true);
+   y += 14;
+   for(int k = 0; k < NE; k++)
+     {
+      int d, layers; double avg, lots, lp, pr;
+      GetBasket(E[k], d, layers, avg, lots, lp, pr);
+      string st = EngineState(E[k], layers);
+      string ks = IntegerToString(k);
+      PRect("eng" + ks, 8, y, W - 16, 34, cCard, cLine);
+      PText("engN" + ks, 16, y + 3, E[k].name, cTxt, 8, true);
+      color stc = (st == "SCANNING" || st == "DCA ACTIVE") ? cAcc : (StringFind(st, "TRAIL") >= 0 ? cBuy : (st == "OFF" ? cDim : cWarn));
+      PText("engS" + ks, W - 16, y + 3, st, stc, 8, true, ANCHOR_RIGHT_UPPER);
+      string info = layers > 0 ?
+                    StringFormat("%s  %d/%d layers  %.2f lot  avg %.2f  P/L %+.2f", d == 1 ? "BUY" : "SELL", layers, E[k].maxLayers, lots, avg, pr) :
+                    StringFormat("DCA $%.0f | max %d layers | %d baskets today", E[k].step, E[k].maxLayers, E[k].basketsToday);
+      PText("engI" + ks, 16, y + 18, info, layers > 0 ? (pr >= 0 ? cBuy : cSell) : cDim, 8);
+      y += 38;
+     }
+
+   // ---- today
+   int trades = 0;
+   for(int k = 0; k < NE; k++) trades += E[k].tradesToday;
+   double dpl = DayPLPct();
+   PText("today", 10, y + 2, StringFormat("Today: %+.2f%%  (target %.0f%% | max loss %.0f%%)  |  %d trades", dpl, InpDailyTargetPct, InpDailyLossPct, trades),
+         dpl >= 0 ? cBuy : cSell, 8, true);
+   y += 22;
+   ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, y);
+
+   // ---- alerts on fresh HIGH signal
+   if(isHigh && (!prevHigh || sd != lastAlertDir) && TimeCurrent() - lastAlertTime >= InpAlertGapMin * 60)
+     {
+      string msg = StringFormat("%s %s %s %d/100 | Entry %s TP1 %s TP2 %s | DCA $%.0f", _Symbol, sd == 1 ? "BUY" : "SELL", Tier(score), score,
+                                DoubleToString(px, _Digits), DoubleToString(tp1, _Digits), DoubleToString(tp2, _Digits), InpInStep);
+      if(InpAlertPopup) Alert(msg);
+      if(InpAlertPush) SendNotification(msg);
+      lastAlertTime = TimeCurrent(); lastAlertDir = sd;
+     }
+   prevHigh = isHigh;
+   ChartRedraw();
   }
 //+------------------------------------------------------------------+
