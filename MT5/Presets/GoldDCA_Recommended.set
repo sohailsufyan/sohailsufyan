@@ -31,3 +31,6 @@ InpFxLock=1
 InpFxTrailDist=2
 InpFxTP=5
 InpFxBookPct=0
+InpFxBackup=true
+InpFxBackupArm=2
+InpFxBackupExit=0.5

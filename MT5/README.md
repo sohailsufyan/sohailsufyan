@@ -141,3 +141,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Average se **+$5** → poora basket close (broker TP bhi +$5 par)
 - Inputs: `InpFxTrigger`, `InpFxLock`, `InpFxTrailDist`, `InpFxTP`, `InpFxBookPct` (trigger par % book, default 0)
 - `InpFxExit = false` karne par purana ATR TP + 50% book + $0.50 breakeven tareeka
+- v3.10: **Backup exit** – price average se +$2 tak aaye (lekin +$3 na chhue) aur wapas +$0.50 par aaye to poora basket profit me close (`InpFxBackup`, `InpFxBackupArm`, `InpFxBackupExit`)

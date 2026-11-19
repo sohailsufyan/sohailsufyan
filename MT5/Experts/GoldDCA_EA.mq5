@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.00"
+#property version   "3.10"
 
 #include <Trade/Trade.mqh>
 
@@ -125,6 +125,9 @@ input double          InpFxLock           = 1.0;          // Trigger par SL aver
 input double          InpFxTrailDist      = 2.0;          // Phir SL price ke $2 peeche chalega
 input double          InpFxTP             = 5.0;          // Average se $5 par poora basket close
 input double          InpFxBookPct        = 0.0;          // Trigger ($3) par itna % book (0 = off)
+input bool            InpFxBackup         = true;         // Backup: +$2 tak aakar palte to chhote profit me nikal jao
+input double          InpFxBackupArm      = 2.0;          // Backup tab active jab price average se +$2 tak pahunche
+input double          InpFxBackupExit     = 0.5;          // Phir wapas +$0.50 par aaye to poora basket close
 
 input group "=== Basket Trailing (ATR mode, jab Fixed $ exit OFF) ==="
 input bool            InpBasketTrail      = true;         // TP par close ki jagah trailing shuru karo
@@ -245,6 +248,7 @@ struct Engine
    double            trailSL;
    int               adoptDir;
    int               side;      // 1 = sirf BUY basket, -1 = sirf SELL basket, 0 = dono
+   double            maxMove;   // average se sabse zyada favourable move (backup exit ke liye)
   };
 
 CTrade   trade;
@@ -298,7 +302,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -551,6 +555,14 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
      {
       double cur  = (dir == 1) ? bid : ask;
       double move = (dir == 1) ? bid - avg : avg - ask;
+      if(move > e.maxMove) e.maxMove = move;
+      // Backup: +$2 tak aaya, +$3 nahi chhua, wapas +$0.50 par aaya -> chhote profit me close
+      if(InpFxBackup && !e.trailActive && e.maxMove >= InpFxBackupArm && move <= InpFxBackupExit && profit > 0)
+        {
+         PrintFormat("[%s] Backup exit: max +$%.2f ke baad +$%.2f par close, profit %.2f", e.name, e.maxMove, move, profit);
+         CloseBasket(e);
+         return;
+        }
       if(move >= InpFxTP && profit > 0)
         {
          PrintFormat("[%s] TP +$%.1f hit: %d layers, profit %.2f", e.name, InpFxTP, layers, profit);
@@ -690,7 +702,7 @@ void CloseBasket(Engine &e)
      }
    e.lastCloseTime = TimeCurrent();
    e.syncedTP = 0; e.syncedSL = 0; e.syncedLayers = 0;
-   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0; e.booked = false;
+   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0; e.booked = false; e.maxMove = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
   }
 
@@ -1314,6 +1326,7 @@ bool Open(Engine &e, int dir, double lot, string tag)
      {
       e.lastLayerTime = TimeCurrent();
       e.lastLayerBar = iTime(_Symbol, e.sigTF, 0);
+      e.maxMove = 0;      // naya layer = naya average, backup dobara se
       e.tradesToday++;
       return true;
      }
@@ -1532,7 +1545,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.00 | %s\n"
+      "GoldDCA_EA v3.10 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1682,7 +1695,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.00  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.10  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
