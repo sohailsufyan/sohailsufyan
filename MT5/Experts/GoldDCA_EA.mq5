@@ -46,9 +46,9 @@ input ENUM_TIMEFRAMES InpScTrendTF        = PERIOD_M15;       // Scalp trend TF
 input double          InpScLotFactor      = 1.0;              // Scalp first lot x base lot
 input double          InpScLotMult        = 1.2;              // Scalp DCA lot multiplier
 input ENUM_STEP_MODE  InpScStepMode       = STEP_FIXED_PRICE; // Scalp step mode
-input double          InpScStep           = 11.0;              // Scalp DCA step ($)
+input double          InpScStep           = 3.0;              // Scalp DCA step ($)
 input double          InpScStepATR        = 1.0;              // Scalp step ATR x (ATR mode)
-input double          InpScStepGrowth     = 1.0;              // Scalp step growth (1.0 = har layer $11)
+input double          InpScStepGrowth     = 1.0;              // Scalp step growth (1.0 = har layer $3)
 input int             InpScMaxLayers      = 0;                // Scalp max layers (0 = unlimited)
 input ENUM_TP_MODE    InpScTPMode         = TP_ATR;           // Scalp TP mode
 input double          InpScTP             = 1.0;              // Scalp fixed TP ($ from average)
@@ -67,9 +67,9 @@ input ENUM_TIMEFRAMES InpInTrendTF        = PERIOD_H1;        // Intraday trend 
 input double          InpInLotFactor      = 1.0;              // Intraday first lot x base lot
 input double          InpInLotMult        = 1.3;              // Intraday DCA lot multiplier
 input ENUM_STEP_MODE  InpInStepMode       = STEP_FIXED_PRICE; // Intraday step mode
-input double          InpInStep           = 11.0;              // Intraday DCA step ($)
+input double          InpInStep           = 3.0;              // Intraday DCA step ($)
 input double          InpInStepATR        = 1.0;              // Intraday step ATR x (ATR mode)
-input double          InpInStepGrowth     = 1.0;              // Intraday step growth (1.0 = har layer $11)
+input double          InpInStepGrowth     = 1.0;              // Intraday step growth (1.0 = har layer $3)
 input int             InpInMaxLayers      = 0;                // Intraday max layers (0 = unlimited)
 input ENUM_TP_MODE    InpInTPMode         = TP_ATR;           // Intraday TP mode
 input double          InpInTP             = 2.0;              // Intraday fixed TP ($ from average)
@@ -94,9 +94,9 @@ input bool            InpTkUseMACD        = false;            // Tick engine par
 input double          InpTkLotFactor      = 1.0;              // Tick first lot x base lot
 input double          InpTkLotMult        = 1.2;              // Tick DCA lot multiplier
 input ENUM_STEP_MODE  InpTkStepMode       = STEP_FIXED_PRICE; // Tick step mode
-input double          InpTkStep           = 11.0;              // Tick DCA step ($)
+input double          InpTkStep           = 3.0;              // Tick DCA step ($)
 input double          InpTkStepATR        = 1.5;              // Tick step ATR x (ATR mode)
-input double          InpTkStepGrowth     = 1.0;              // Tick step growth (1.0 = har layer $11)
+input double          InpTkStepGrowth     = 1.0;              // Tick step growth (1.0 = har layer $3)
 input int             InpTkMaxLayers      = 0;                // Tick max layers (0 = unlimited)
 input ENUM_TP_MODE    InpTkTPMode         = TP_ATR;           // Tick TP mode
 input double          InpTkTP             = 0.5;              // Tick fixed TP ($ from average)
