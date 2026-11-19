@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.10"
+#property version   "3.20"
 
 #include <Trade/Trade.mqh>
 
@@ -212,6 +212,18 @@ input int             InpServerGMTOffset  = 2;            // Broker server time 
 input string          InpSymDollar        = "EURUSD";     // Dollar proxy symbol (blank = off)
 input string          InpSymSilver        = "XAGUSD";     // Silver symbol (blank = off)
 
+input group "=== Institutional: Structure (BOS/CHoCH) + Liquidity Sweep + VWAP ==="
+input bool            InpUseStructure     = true;         // Entry sirf market structure (BOS/CHoCH) ki direction me
+input ENUM_TIMEFRAMES InpStructTF         = PERIOD_M15;   // Structure / sweep timeframe
+input int             InpSwingLen         = 3;            // Swing point: dono taraf kitne candles (fractal)
+input int             InpStructLookback   = 300;          // Kitne candles peeche tak structure padhe
+input bool            InpRequireSweep     = false;        // Entry ke liye recent liquidity sweep zaroori
+input int             InpSweepBars        = 8;            // Sweep kitne candles purana tak maanya
+input bool            InpUseVWAP          = true;         // BUY sirf VWAP ke upar, SELL sirf neeche
+input bool            InpVWAPDCA          = false;        // DCA layer sirf VWAP band ke bahar (BUY: VWAP - band se neeche)
+input double          InpVWAPBandSD       = 1.0;          // VWAP band = itne standard deviation
+input bool            InpDrawInst         = true;         // Chart par VWAP, bands, swing levels, sweep draw karo
+
 input group "=== Filters ==="
 input int             InpMaxSpreadPoints  = 50;           // Max spread (points)
 input bool            InpUseSession       = true;         // Session filter
@@ -280,6 +292,18 @@ SRLevel  levels[];
 datetime lastLevelsBar = 0, lastLevelsTry = 0;
 #define  SRPFX "GDCA_SR_"
 #define  PFX   "GDCA_P_"
+#define  IPFX  "GDCA_I_"
+
+//--- Institutional state
+int      stBias = 0;           // 1 = bullish structure, -1 = bearish
+string   stType = "";          // "BOS" ya "CHoCH"
+double   stSwingH = 0, stSwingL = 0, stBreakLvl = 0;
+datetime stBreakTime = 0, stLastBar = 0;
+int      swDir = 0;            // latest liquidity sweep: 1 = sell-side sweep (BUY), -1 = buy-side sweep (SELL)
+double   swLevel = 0;
+datetime swTime = 0;
+double   vwap = 0, vwapSD = 0;
+datetime vwapBar = 0;
 
 //--- Chart button controls (runtime, inputs ke upar override)
 bool     rtPaused = false;
@@ -399,6 +423,7 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
+   ObjectsDeleteAll(0, IPFX);
    IndicatorRelease(hMF); IndicatorRelease(hMS);
    for(int k = 0; k < NE; k++) ReleaseEngine(E[k]);
    for(int i = 0; i < 5; i++) { IndicatorRelease(hScF[i]); IndicatorRelease(hScS[i]); }
@@ -413,6 +438,8 @@ void OnDeinit(const int reason)
 void OnTick()
   {
    UpdateLevels(false);
+   UpdateStructure();
+   UpdateVWAP();
    CheckNewDay();
    UpdateNews();
    CheckCutloss();
@@ -672,6 +699,12 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
       if(cur + LayerLot(e, layers) > InpMaxTotalLots + 1e-9) return;
      }
    if(InpNewCandleLayer && iTime(_Symbol, e.sigTF, 0) == e.lastLayerBar) return;
+   if(InpVWAPDCA && vwap > 0)
+     {
+      double band = vwapSD * InpVWAPBandSD;
+      if(dir == 1 && ask > vwap - band) return;      // BUY layer sirf discount zone me
+      if(dir == -1 && bid < vwap + band) return;     // SELL layer sirf premium zone me
+     }
    if(InpUseNews && InpNewsNoDCA && newsActive) return;
    if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) return;
    if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > e.maxSpread) return;
@@ -1102,6 +1135,7 @@ void TryNewBasket(Engine &e, int k)
      }
    if(sig == 0) return;
    if(e.side != 0 && sig != e.side) return;
+   if(!InstOK(sig)) return;
    if(sig == 1 && (!InpAllowBuy || rtSide == -1)) return;
    if(sig == -1 && (!InpAllowSell || rtSide == 1)) return;
 
@@ -1545,7 +1579,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.10 | %s\n"
+      "GoldDCA_EA v3.20 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1695,7 +1729,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.10  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.20  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1775,6 +1809,15 @@ void ShowPanel()
    PText("sesT", 16, y + 4, "Session: " + ses + "   |   next open " + ISTTime(nextH), cTxt, 8);
    PText("news", W - 16, y + 4, newsActive ? "NEWS!" : "News clear", newsActive ? cSell : cBuy, 8, true, ANCHOR_RIGHT_UPPER);
    y += 28;
+   PRect("inst", 8, y, W - 16, 38, cCard, cLine);
+   string stTxt = stBias == 1 ? "BULLISH" : (stBias == -1 ? "BEARISH" : "-");
+   PText("instS", 16, y + 3, "Structure: " + stTxt + (stType != "" ? " (" + stType + ")" : ""), stBias == 1 ? cBuy : (stBias == -1 ? cSell : cDim), 8, true);
+   string swTxt = swDir == 0 ? "Sweep: none" : StringFormat("Sweep: %s @ %.2f", swDir == 1 ? "sell-side (BUY)" : "buy-side (SELL)", swLevel);
+   PText("instW", W - 16, y + 3, swTxt, swDir == 1 ? cBuy : (swDir == -1 ? cSell : cDim), 8, false, ANCHOR_RIGHT_UPPER);
+   double bidNow = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   string vTxt = vwap > 0 ? StringFormat("VWAP %.2f  (%s)  | band +/-%.2f", vwap, bidNow >= vwap ? "price ABOVE -> BUY side" : "price BELOW -> SELL side", vwapSD * InpVWAPBandSD) : "VWAP: -";
+   PText("instV", 16, y + 20, vTxt, vwap > 0 ? (bidNow >= vwap ? cBuy : cSell) : cDim, 8);
+   y += 44;
 
    // ---- engines
    PText("engT", 10, y, InpHedgeMode ? "ENGINES  (HEDGE: BUY + SELL alag basket)" : "ENGINES", cDim, 7, true);
@@ -1959,4 +2002,148 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    SaveControls();
    lastPanel = 0;
    ShowPanel();
+  }
+
+//==================== INSTITUTIONAL: STRUCTURE / SWEEP / VWAP ====================
+// Market structure (fractal swings) + BOS/CHoCH + liquidity sweep, har naye StructTF candle par
+void UpdateStructure()
+  {
+   datetime bar = iTime(_Symbol, InpStructTF, 0);
+   if(bar == 0 || bar == stLastBar) return;
+   MqlRates r[];
+   ArraySetAsSeries(r, false);                       // oldest first
+   int n = CopyRates(_Symbol, InpStructTF, 1, InpStructLookback, r);
+   int L = MathMax(1, InpSwingLen);
+   if(n < 2 * L + 5) return;
+   stLastBar = bar;
+
+   double lastH = 0, lastL = 0, refH = 0, refL = 0;
+   int bias = 0; string typ = "";
+   double brk = 0; datetime brkT = 0;
+   int sd = 0; double slv = 0; datetime st = 0;
+   double pdh = iHigh(_Symbol, PERIOD_D1, 1), pdl = iLow(_Symbol, PERIOD_D1, 1);
+
+   for(int i = L; i < n; i++)
+     {
+      // swing confirm at j (needs L bars on both sides)
+      int j = i - L;
+      if(j >= L)
+        {
+         bool isH = true, isL = true;
+         for(int k = 1; k <= L; k++)
+           {
+            if(r[j].high <= r[j - k].high || r[j].high < r[j + k].high) isH = false;
+            if(r[j].low >= r[j - k].low || r[j].low > r[j + k].low) isL = false;
+           }
+         if(isH) { lastH = r[j].high; refH = r[j].high; }
+         if(isL) { lastL = r[j].low;  refL = r[j].low; }
+        }
+      // BOS / CHoCH on candle close
+      if(lastH > 0 && r[i].close > lastH)
+        { typ = (bias == -1) ? "CHoCH" : "BOS"; bias = 1; brk = lastH; brkT = r[i].time; lastH = 0; }
+      else if(lastL > 0 && r[i].close < lastL)
+        { typ = (bias == 1) ? "CHoCH" : "BOS"; bias = -1; brk = lastL; brkT = r[i].time; lastL = 0; }
+
+      // Liquidity sweep in recent candles: wick beyond swing / PDH-PDL, close back inside
+      if(i >= n - InpSweepBars)
+        {
+         double lvls[2]; lvls[0] = refL; lvls[1] = pdl;
+         for(int q = 0; q < 2; q++)
+            if(lvls[q] > 0 && r[i].low < lvls[q] && r[i].close > lvls[q]) { sd = 1; slv = lvls[q]; st = r[i].time; }
+         double lvlh[2]; lvlh[0] = refH; lvlh[1] = pdh;
+         for(int q = 0; q < 2; q++)
+            if(lvlh[q] > 0 && r[i].high > lvlh[q] && r[i].close < lvlh[q]) { sd = -1; slv = lvlh[q]; st = r[i].time; }
+        }
+     }
+   if(bias != stBias || typ != stType)
+      PrintFormat("Structure: %s %s @ %.2f", bias == 1 ? "BULLISH" : (bias == -1 ? "BEARISH" : "-"), typ, brk);
+   stBias = bias; stType = typ; stBreakLvl = brk; stBreakTime = brkT;
+   stSwingH = refH; stSwingL = refL;
+   swDir = sd; swLevel = slv; swTime = st;
+   DrawInst();
+  }
+
+// Session VWAP (aaj ke din ka, M1 tick volume se) + standard deviation band
+void UpdateVWAP()
+  {
+   datetime bar = iTime(_Symbol, PERIOD_M1, 0);
+   if(bar == 0 || bar == vwapBar) return;
+   vwapBar = bar;
+   datetime dayStart = iTime(_Symbol, PERIOD_D1, 0);
+   MqlRates r[];
+   int n = CopyRates(_Symbol, PERIOD_M1, dayStart, TimeCurrent(), r);
+   if(n <= 0) return;
+   double sv = 0, spv = 0, sp2v = 0;
+   for(int i = 0; i < n; i++)
+     {
+      double tp = (r[i].high + r[i].low + r[i].close) / 3.0;
+      double v = (double)MathMax((long)1, r[i].tick_volume);
+      sv += v; spv += tp * v; sp2v += tp * tp * v;
+     }
+   if(sv <= 0) return;
+   vwap = spv / sv;
+   double vr = sp2v / sv - vwap * vwap;
+   vwapSD = vr > 0 ? MathSqrt(vr) : 0;
+   DrawInst();
+  }
+
+// Entry filter: structure + sweep + VWAP
+bool InstOK(int sig)
+  {
+   if(InpUseStructure && stBias != sig) return false;
+   if(InpRequireSweep && swDir != sig) return false;
+   if(InpUseVWAP && vwap > 0)
+     {
+      double px = sig == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(sig == 1 && px < vwap) return false;
+      if(sig == -1 && px > vwap) return false;
+     }
+   return true;
+  }
+
+void IHLine(string id, double price, color c, ENUM_LINE_STYLE st, int w, string label)
+  {
+   string n = IPFX + id;
+   if(price <= 0) { ObjectDelete(0, n); ObjectDelete(0, n + "_T"); return; }
+   datetime t1 = iTime(_Symbol, PERIOD_D1, 0), t2 = TimeCurrent() + PeriodSeconds(PERIOD_H1) * 3;
+   if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_TREND, 0, t1, price, t2, price);
+   else { ObjectMove(0, n, 0, t1, price); ObjectMove(0, n, 1, t2, price); }
+   ObjectSetInteger(0, n, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, n, OBJPROP_STYLE, st);
+   ObjectSetInteger(0, n, OBJPROP_WIDTH, w);
+   ObjectSetInteger(0, n, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_BACK, true);
+   string t = n + "_T";
+   if(ObjectFind(0, t) < 0) ObjectCreate(0, t, OBJ_TEXT, 0, t2, price);
+   else ObjectMove(0, t, 0, t2, price);
+   ObjectSetString(0, t, OBJPROP_TEXT, label + " " + DoubleToString(price, _Digits));
+   ObjectSetInteger(0, t, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, t, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, t, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+   ObjectSetInteger(0, t, OBJPROP_SELECTABLE, false);
+  }
+
+void DrawInst()
+  {
+   if(!InpDrawInst || (MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE))) return;
+   double b = vwapSD * InpVWAPBandSD;
+   IHLine("vwap", vwap, clrDeepSkyBlue, STYLE_SOLID, 2, "VWAP");
+   IHLine("vwapU", vwap > 0 && b > 0 ? vwap + b : 0, clrDeepSkyBlue, STYLE_DOT, 1, "VWAP +band");
+   IHLine("vwapD", vwap > 0 && b > 0 ? vwap - b : 0, clrDeepSkyBlue, STYLE_DOT, 1, "VWAP -band");
+   IHLine("swH", stSwingH, clrOrange, STYLE_DASH, 1, "Swing High (liquidity)");
+   IHLine("swL", stSwingL, clrOrange, STYLE_DASH, 1, "Swing Low (liquidity)");
+   IHLine("brk", stBreakLvl, stBias == 1 ? clrLimeGreen : clrTomato, STYLE_DASHDOT, 1, stType != "" ? stType + " level" : "Break");
+   string a = IPFX + "sweep";
+   if(swDir != 0 && swTime > 0)
+     {
+      if(ObjectFind(0, a) < 0) ObjectCreate(0, a, OBJ_ARROW, 0, swTime, swLevel);
+      else ObjectMove(0, a, 0, swTime, swLevel);
+      ObjectSetInteger(0, a, OBJPROP_ARROWCODE, swDir == 1 ? 233 : 234);
+      ObjectSetInteger(0, a, OBJPROP_COLOR, swDir == 1 ? clrLimeGreen : clrTomato);
+      ObjectSetInteger(0, a, OBJPROP_WIDTH, 3);
+      ObjectSetInteger(0, a, OBJPROP_ANCHOR, swDir == 1 ? ANCHOR_TOP : ANCHOR_BOTTOM);
+      ObjectSetString(0, a, OBJPROP_TOOLTIP, swDir == 1 ? "Sell-side liquidity sweep" : "Buy-side liquidity sweep");
+     }
+   else ObjectDelete(0, a);
   }

@@ -142,3 +142,9 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Inputs: `InpFxTrigger`, `InpFxLock`, `InpFxTrailDist`, `InpFxTP`, `InpFxBookPct` (trigger par % book, default 0)
 - `InpFxExit = false` karne par purana ATR TP + 50% book + $0.50 breakeven tareeka
 - v3.10: **Backup exit** – price average se +$2 tak aaye (lekin +$3 na chhue) aur wapas +$0.50 par aaye to poora basket profit me close (`InpFxBackup`, `InpFxBackupArm`, `InpFxBackupExit`)
+
+## v3.20 – Institutional: Structure (BOS/CHoCH) + Liquidity Sweep + VWAP
+- **Market structure (M15):** fractal swing high/low; close swing ke paar = **BOS** (trend jaari) ya **CHoCH** (trend badla). Naya basket sirf structure ki direction me (`InpUseStructure`)
+- **Liquidity sweep:** swing ya pichle din ke high/low ke paar wick, phir wapas andar close = stop-hunt. `InpRequireSweep = true` karne par entry sirf sweep ke baad
+- **VWAP (aaj ka):** BUY sirf VWAP ke upar, SELL sirf neeche (`InpUseVWAP`). `InpVWAPDCA = true`: DCA layer sirf VWAP band ke bahar (discount/premium zone)
+- Chart: VWAP + bands (neela), swing levels (orange), BOS/CHoCH level, sweep arrow. Panel me Structure / Sweep / VWAP row
