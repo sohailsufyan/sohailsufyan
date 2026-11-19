@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.92"
+#property version   "3.00"
 
 #include <Trade/Trade.mqh>
 
@@ -118,7 +118,15 @@ input double          InpBEBuffer         = 0.5;          // Average se itna $ u
 input double          InpMaxTotalLots     = 0.0;          // Ek basket ka max total lot (0 = no limit)
 input bool            InpNewCandleLayer   = true;         // Ek candle me max 1 layer (naya candle aane par hi agla layer)
 
-input group "=== Basket Trailing ==="
+input group "=== Exit: Fixed $ Lock + Trailing (default) ==="
+input bool            InpFxExit           = true;         // ON: niche wale $ niyam (ATR TP / 50% book / $0.50 exit ki jagah)
+input double          InpFxTrigger        = 3.0;          // Average se $3 profit par trailing shuru
+input double          InpFxLock           = 1.0;          // Trigger par SL average + $1 par lock
+input double          InpFxTrailDist      = 2.0;          // Phir SL price ke $2 peeche chalega
+input double          InpFxTP             = 5.0;          // Average se $5 par poora basket close
+input double          InpFxBookPct        = 0.0;          // Trigger ($3) par itna % book (0 = off)
+
+input group "=== Basket Trailing (ATR mode, jab Fixed $ exit OFF) ==="
 input bool            InpBasketTrail      = true;         // TP par close ki jagah trailing shuru karo
 input double          InpTrailLockPct     = 50.0;         // Trailing start par TP ka itna % lock
 input double          InpTrailDistMult    = 1.0;          // Trailing distance = TP distance x ye
@@ -538,10 +546,45 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
 
    if(InpBrokerSLTP) SyncSLTP(e, dir, layers, avg);
 
-   //--- 1) Basket TP / Trailing
+   //--- 1a) Fixed $ exit: +$3 par +$1 lock, phir $2 trailing, +$5 par close
+   if(InpFxExit)
+     {
+      double cur  = (dir == 1) ? bid : ask;
+      double move = (dir == 1) ? bid - avg : avg - ask;
+      if(move >= InpFxTP && profit > 0)
+        {
+         PrintFormat("[%s] TP +$%.1f hit: %d layers, profit %.2f", e.name, InpFxTP, layers, profit);
+         CloseBasket(e);
+         return;
+        }
+      if(!e.trailActive && move >= InpFxTrigger)
+        {
+         e.trailActive = true;
+         e.trailSL = (dir == 1) ? avg + InpFxLock : avg - InpFxLock;
+         PrintFormat("[%s] +$%.1f aaya: SL +$%.1f par lock (%.2f), trailing shuru", e.name, InpFxTrigger, InpFxLock, e.trailSL);
+         if(InpFxBookPct > 0) BookPartial(e, InpFxBookPct);
+        }
+      if(e.trailActive)
+        {
+         double cand = (dir == 1) ? cur - InpFxTrailDist : cur + InpFxTrailDist;
+         if(dir == 1 && cand > e.trailSL + 0.1) e.trailSL = cand;
+         if(dir == -1 && cand < e.trailSL - 0.1) e.trailSL = cand;
+         bool hit = (dir == 1) ? (bid <= e.trailSL) : (ask >= e.trailSL);
+         if(hit)
+           {
+            PrintFormat("[%s] Trailing SL hit: %d layers, profit %.2f", e.name, layers, profit);
+            CloseBasket(e);
+            return;
+           }
+        }
+     }
+
+   //--- 1) Basket TP / Trailing (ATR mode)
    double tpDist = TPDist(e);
-   bool tpHit = (dir == 1) ? (bid >= avg + tpDist) : (ask <= avg - tpDist);
-   if(!InpBasketTrail)
+   if(InpFxExit) tpDist = DBL_MAX;   // ATR exit band
+   bool tpHit = !InpFxExit && ((dir == 1) ? (bid >= avg + tpDist) : (ask <= avg - tpDist));
+   if(InpFxExit) { }
+   else if(!InpBasketTrail)
      {
       if(tpHit && profit > 0)
         {
@@ -585,8 +628,8 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
       return;
      }
 
-   //--- 2b) Breakeven exit (lambi DCA ke baad average par lautne par)
-   if(InpBEExit && !e.trailActive && layers >= InpBEMinLayers && profit > 0)
+   //--- 2b) Breakeven exit (lambi DCA ke baad average par lautne par) - Fixed $ exit me band
+   if(InpBEExit && !InpFxExit && !e.trailActive && layers >= InpBEMinLayers && profit > 0)
      {
       bool be = (dir == 1) ? (bid >= avg + InpBEBuffer) : (ask <= avg - InpBEBuffer);
       if(be)
@@ -1150,6 +1193,7 @@ double SigATR(Engine &e)
 
 double TPDist(Engine &e)
   {
+   if(InpFxExit) return InpFxTP;
    if(e.tpMode == TP_ATR)
      {
       double a = SigATR(e);
@@ -1189,7 +1233,7 @@ void SyncSLTP(Engine &e, int dir, int layers, double avg)
 
    if(e.trailActive)
      {
-      tp = 0;   // trailing chal raha hai - TP hata do, SL hi exit karega
+      if(!InpFxExit) tp = 0;   // ATR mode: trailing chal raha hai - TP hata do; Fixed mode: +$5 TP rehta hai
       sl = NormalizeDouble(e.trailSL, digits);
      }
    if(dir == 1)
@@ -1488,7 +1532,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.92 | %s\n"
+      "GoldDCA_EA v3.00 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1638,7 +1682,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.92  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.00  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1680,11 +1724,12 @@ void ShowPanel()
    if(atr == EMPTY_VALUE) atr = 0;
    double tp1d = MathMax(atr * InpInTP_ATR, InpInTPMin);
    double tp1 = px + sd * tp1d, tp2 = px + sd * 2.0 * MathMax(atr, tp1d);
+   if(InpFxExit) { tp1 = px + sd * InpFxTrigger; tp2 = px + sd * InpFxTP; }
    int ty = y + 76;
    PText("pE", 18, ty, "ENTRY", cDim, 7);       PText("pEv", 18, ty + 12, DoubleToString(px, _Digits), cTxt, 9, true);
-   PText("pT1", 105, ty, "TP1 (" + DoubleToString(InpBookPct, 0) + "% book)", cDim, 7);
+   PText("pT1", 105, ty, InpFxExit ? StringFormat("+$%.0f: lock +$%.0f, trail", InpFxTrigger, InpFxLock) : "TP1 (" + DoubleToString(InpBookPct, 0) + "% book)", cDim, 7);
    PText("pT1v", 105, ty + 12, DoubleToString(tp1, _Digits), cBuy, 9, true);
-   PText("pT2", 225, ty, "TP2 (trailing)", cDim, 7); PText("pT2v", 225, ty + 12, DoubleToString(tp2, _Digits), cBuy, 9, true);
+   PText("pT2", 225, ty, InpFxExit ? StringFormat("TP +$%.0f (close)", InpFxTP) : "TP2 (trailing)", cDim, 7); PText("pT2v", 225, ty + 12, DoubleToString(tp2, _Digits), cBuy, 9, true);
    string dca = "DCA every $" + DoubleToString(E[1].step, 0) + ": ";
    for(int i = 1; i <= DcaShow(); i++)
       dca += DoubleToString(px - sd * E[1].step * i, 1) + (i < DcaShow() ? " | " : "");

@@ -134,3 +134,10 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Panel par 6 engine rows (BUY hara, SELL laal); ON/OFF button dono side ek saath
 - v2.91: `InpAddOnlyInTrend = false` (default) – BUY aur SELL dono side ka DCA hamesha chalu, chahe basket EA ne khola ho ya manual trade ho
 - v2.92: retracement exit – DCA wala basket (2+ layers) BUY ho ya SELL, average + $0.50 profit aate hi poora close (`InpBEMinLayers = 2`)
+
+## v3.00 – Fixed $ exit (default, BUY aur SELL dono basket par)
+- Average se **+$3** → SL **+$1** par lock, trailing shuru
+- Trailing SL price ke **$2 peeche** chalta hai
+- Average se **+$5** → poora basket close (broker TP bhi +$5 par)
+- Inputs: `InpFxTrigger`, `InpFxLock`, `InpFxTrailDist`, `InpFxTP`, `InpFxBookPct` (trigger par % book, default 0)
+- `InpFxExit = false` karne par purana ATR TP + 50% book + $0.50 breakeven tareeka
