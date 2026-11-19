@@ -10,13 +10,15 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.00"
+#property version   "2.10"
 
 #include <Trade/Trade.mqh>
 
 enum ENUM_LOT_MODE  { LOT_FIXED = 0, LOT_AUTO = 1 };
 enum ENUM_STEP_MODE { STEP_FIXED_PRICE = 0, STEP_ATR = 1 };
 enum ENUM_TP_MODE   { TP_FIXED_PRICE = 0, TP_ATR = 1 };
+enum ENUM_LOT_PROG  { PROG_MULTIPLIER = 0, PROG_FIXED_ADD = 1 };
+enum ENUM_MAN_ENG   { MAN_SCALP = 0, MAN_INTRADAY = 1 };
 
 input group "=== General ==="
 input long            InpMagic            = 888001;       // Base magic (Scalp = +1, Intraday = +2)
@@ -31,6 +33,8 @@ input ENUM_LOT_MODE   InpLotMode          = LOT_AUTO;     // Lot mode
 input double          InpFixedLot         = 0.01;         // Fixed first lot
 input double          InpBalancePerLot    = 1000.0;       // AUTO: har itne $ balance par 0.01 lot
 input double          InpMaxLot           = 2.0;          // Max lot per layer
+input ENUM_LOT_PROG   InpLotProgression   = PROG_FIXED_ADD; // DCA lot: Multiplier (x) ya Fixed Add (+)
+input double          InpLotAddFactor     = 0.5;          // Fixed Add: har layer par +pehla lot x ye (1.0 = 0.01,0.02,0.03..)
 
 input group "=== SCALP Engine ==="
 input bool            InpScOn             = true;             // Scalp ON
@@ -78,6 +82,23 @@ input group "=== DCA / Exit (shared) ==="
 input int             InpMinSecBetween    = 60;           // Layers ke beech min seconds
 input bool            InpAddOnlyInTrend   = true;         // Trend palat jaye to naya layer mat jodo
 input bool            InpBrokerSLTP       = true;         // Auto SL/TP broker par bhi lagao
+input bool            InpNewCandleLayer   = true;         // Ek candle me max 1 layer (naya candle aane par hi agla layer)
+
+input group "=== Basket Trailing ==="
+input bool            InpBasketTrail      = true;         // TP par close ki jagah trailing shuru karo
+input double          InpTrailLockPct     = 50.0;         // Trailing start par TP ka itna % lock
+input double          InpTrailDistMult    = 1.0;          // Trailing distance = TP distance x ye
+input double          InpTrailStep        = 0.3;          // SL kam se kam itna $ move ho tab update
+
+input group "=== Cutloss ($) ==="
+input double          InpCutlossUSD       = 0.0;          // Dono engine ka floating loss itna $ ho to sab close (0 = off)
+input bool            InpResumeAfterCut   = true;         // true = cooldown ke baad phir shuru, false = din band
+input int             InpCutCooldownMin   = 30;           // Cutloss ke baad wait (minutes)
+
+input group "=== Manual Trades ==="
+input bool            InpManageManual     = true;         // Manual trades ko DCA basket me manage karo
+input ENUM_MAN_ENG    InpManualEngine     = MAN_INTRADAY; // Manual trade kaunsa engine sambhale
+input bool            InpManualAnyMagic   = false;        // true = doosre EA ke trades bhi (warna sirf magic 0)
 
 input group "=== Daily Limits (account) ==="
 input double          InpDailyTargetPct   = 5.0;          // Daily target % - hit hone par naye basket band
@@ -154,6 +175,10 @@ struct Engine
    datetime          lastSigBar, lastCloseTime, lastLayerTime;
    double            basketStartEq, syncedTP, syncedSL;
    int               syncedLayers, basketsToday, tradesToday;
+   datetime          lastLayerBar;
+   bool              trailActive, manual;
+   double            trailSL;
+   int               adoptDir;
   };
 
 CTrade   trade;
@@ -163,6 +188,7 @@ datetime lastNewsCheck = 0;
 bool     newsActive = false, newsSoon = false, dayStopped = false;
 double   dayStartEq = 0;
 int      dayKey = -1;
+datetime cutlossUntil = 0;
 
 struct SRLevel { double price; int rank; string tag; };
 SRLevel  levels[];
@@ -181,6 +207,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    if(!on) return true;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -222,6 +249,9 @@ int OnInit()
                    InpInMaxATR, InpInMinATR))
      { Print("Intraday indicator error: ", GetLastError()); return(INIT_FAILED); }
 
+   E[0].manual = InpManageManual && InpManualEngine == MAN_SCALP && InpScOn;
+   E[1].manual = InpManageManual && InpManualEngine == MAN_INTRADAY && InpInOn;
+
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: Ye EA HEDGING account ke liye hai. Netting account par layers merge ho jayenge.");
    if(InpScStopPct <= 0 || InpInStopPct <= 0)
@@ -246,9 +276,11 @@ void OnTick()
    UpdateLevels(false);
    CheckNewDay();
    UpdateNews();
+   CheckCutloss();
 
    for(int k = 0; k < 2; k++)
      {
+      UpdateAdopt(E[k]);
       if(!E[k].on && CountLayers(E[k]) == 0) continue;
       int dir, layers; double avg, lots, lastPrice, profit;
       GetBasket(E[k], dir, layers, avg, lots, lastPrice, profit);
@@ -294,9 +326,43 @@ double DayPLPct()
   }
 
 //==================== BASKET ====================
+bool IsForeign(long mg)
+  {
+   if(mg == E[0].magic || mg == E[1].magic) return false;
+   return InpManualAnyMagic || mg == 0;
+  }
+
+// Selected position is engine ka? (apne magic + adopt kiye manual trades)
 bool IsMine(Engine &e)
   {
-   return PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == e.magic;
+   if(PositionGetString(POSITION_SYMBOL) != _Symbol) return false;
+   long mg = PositionGetInteger(POSITION_MAGIC);
+   if(mg == e.magic) return true;
+   if(!e.manual || e.adoptDir == 0 || !IsForeign(mg)) return false;
+   int d = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+   return d == e.adoptDir;
+  }
+
+// Manual engine ke liye basket direction tay karo
+void UpdateAdopt(Engine &e)
+  {
+   e.adoptDir = 0;
+   if(!e.manual) return;
+   datetime oldest = 0; int foreignDir = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(PositionGetTicket(i) == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      long mg = PositionGetInteger(POSITION_MAGIC);
+      int d = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      if(mg == e.magic) { e.adoptDir = d; return; }       // apna basket chal raha hai
+      if(IsForeign(mg))
+        {
+         datetime t = (datetime)PositionGetInteger(POSITION_TIME);
+         if(oldest == 0 || t < oldest) { oldest = t; foreignDir = d; }
+        }
+     }
+   e.adoptDir = foreignDir;
   }
 
 int CountLayers(Engine &e)
@@ -337,14 +403,41 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
 
    if(InpBrokerSLTP) SyncSLTP(e, dir, layers, avg);
 
-   //--- 1) Basket TP
+   //--- 1) Basket TP / Trailing
    double tpDist = TPDist(e);
    bool tpHit = (dir == 1) ? (bid >= avg + tpDist) : (ask <= avg - tpDist);
-   if(tpHit && profit > 0)
+   if(!InpBasketTrail)
      {
-      PrintFormat("[%s] Basket TP: %d layers, profit %.2f", e.name, layers, profit);
-      CloseBasket(e);
-      return;
+      if(tpHit && profit > 0)
+        {
+         PrintFormat("[%s] Basket TP: %d layers, profit %.2f", e.name, layers, profit);
+         CloseBasket(e);
+         return;
+        }
+     }
+   else
+     {
+      double cur = (dir == 1) ? bid : ask;
+      if(!e.trailActive && tpHit)
+        {
+         e.trailActive = true;
+         double lock = tpDist * InpTrailLockPct / 100.0;
+         e.trailSL = (dir == 1) ? avg + lock : avg - lock;
+         PrintFormat("[%s] Trailing shuru, SL lock %.2f", e.name, e.trailSL);
+        }
+      if(e.trailActive)
+        {
+         double cand = (dir == 1) ? cur - tpDist * InpTrailDistMult : cur + tpDist * InpTrailDistMult;
+         if(dir == 1 && cand > e.trailSL + InpTrailStep) e.trailSL = cand;
+         if(dir == -1 && cand < e.trailSL - InpTrailStep) e.trailSL = cand;
+         bool hit = (dir == 1) ? (bid <= e.trailSL) : (ask >= e.trailSL);
+         if(hit)
+           {
+            PrintFormat("[%s] Trailing SL hit: %d layers, profit %.2f", e.name, layers, profit);
+            CloseBasket(e);
+            return;
+           }
+        }
      }
 
    //--- 2) Hard stop
@@ -365,8 +458,10 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
      }
 
    //--- 4) DCA layer
-   if(!e.on || dayStopped) return;
+   if(!e.on || dayStopped || e.trailActive) return;
+   if(TimeCurrent() < cutlossUntil) return;
    if(layers >= e.maxLayers) return;
+   if(InpNewCandleLayer && iTime(_Symbol, e.sigTF, 0) == e.lastLayerBar) return;
    if(InpUseNews && InpNewsNoDCA && newsActive) return;
    if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) return;
    if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > InpMaxSpreadPoints) return;
@@ -397,7 +492,26 @@ void CloseBasket(Engine &e)
      }
    e.lastCloseTime = TimeCurrent();
    e.syncedTP = 0; e.syncedSL = 0; e.syncedLayers = 0;
+   e.trailActive = false; e.trailSL = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
+  }
+
+//==================== CUTLOSS ($) ====================
+void CheckCutloss()
+  {
+   if(InpCutlossUSD <= 0) return;
+   double total = 0;
+   for(int k = 0; k < 2; k++)
+     {
+      int d, l; double a, lots, lp, pr;
+      GetBasket(E[k], d, l, a, lots, lp, pr);
+      total += pr;
+     }
+   if(total > -InpCutlossUSD) return;
+   PrintFormat("CUTLOSS: floating %.2f <= -%.2f. Sab close.", total, InpCutlossUSD);
+   CloseBasket(E[0]); CloseBasket(E[1]);
+   if(InpResumeAfterCut) cutlossUntil = TimeCurrent() + InpCutCooldownMin * 60;
+   else dayStopped = true;
   }
 
 //==================== ENTRY ====================
@@ -405,6 +519,7 @@ void TryNewBasket(Engine &e, int k)
   {
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
    if(dayStopped) return;
+   if(TimeCurrent() < cutlossUntil) return;
    if(InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct) return;
    if(e.basketsToday >= e.maxBaskets) return;
    if(TimeCurrent() - e.lastCloseTime < e.cooldownMin * 60) return;
@@ -531,23 +646,30 @@ void SyncSLTP(Engine &e, int dir, int layers, double avg)
       ENUM_ORDER_TYPE ot = dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
       if(OrderCalcProfit(ot, _Symbol, 1.0, avg, dir == 1 ? avg + 1.0 : avg - 1.0, perDollar) && perDollar > 0)
         {
-         double dist = (e.basketStartEq * e.stopPct / 100.0) / (totalLots * perDollar);
+         double allow = e.basketStartEq * e.stopPct / 100.0;
+         if(InpCutlossUSD > 0) allow = MathMin(allow, InpCutlossUSD);
+         double dist = allow / (totalLots * perDollar);
          sl = NormalizeDouble(dir == 1 ? avg - dist : avg + dist, digits);
         }
      }
 
+   if(e.trailActive)
+     {
+      tp = 0;   // trailing chal raha hai - TP hata do, SL hi exit karega
+      sl = NormalizeDouble(e.trailSL, digits);
+     }
    if(dir == 1)
      {
-      if(tp - ask < minStop) tp = 0;
+      if(tp > 0 && tp - ask < minStop) tp = 0;
       if(sl > 0 && bid - sl < minStop) sl = 0;
      }
    else
      {
-      if(bid - tp < minStop) tp = 0;
+      if(tp > 0 && bid - tp < minStop) tp = 0;
       if(sl > 0 && sl - ask < minStop) sl = 0;
      }
 
-   bool changed = (layers != e.syncedLayers) || MathAbs(tp - e.syncedTP) > 50 * _Point || MathAbs(sl - e.syncedSL) > 50 * _Point;
+   bool changed = (layers != e.syncedLayers) || MathAbs(tp - e.syncedTP) > 50 * _Point || MathAbs(sl - e.syncedSL) > 20 * _Point;
    if(!changed) return;
 
    trade.SetExpertMagicNumber(e.magic);
@@ -591,7 +713,10 @@ double LayerLot(Engine &e, int layerIndex)
    if(InpLotMode == LOT_AUTO && InpBalancePerLot > 0)
       base = 0.01 * MathFloor(AccountInfoDouble(ACCOUNT_BALANCE) / InpBalancePerLot);
    if(base <= 0) base = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   return NormLot(base * e.lotFactor * MathPow(e.lotMult, layerIndex));
+   double first = base * e.lotFactor;
+   if(InpLotProgression == PROG_FIXED_ADD)
+      return NormLot(first + first * InpLotAddFactor * layerIndex);
+   return NormLot(first * MathPow(e.lotMult, layerIndex));
   }
 
 bool MarginOK(int dir, double lot)
@@ -610,6 +735,7 @@ bool Open(Engine &e, int dir, double lot, string tag)
    if(ok && (trade.ResultRetcode() == TRADE_RETCODE_DONE || trade.ResultRetcode() == TRADE_RETCODE_PLACED))
      {
       e.lastLayerTime = TimeCurrent();
+      e.lastLayerBar = iTime(_Symbol, e.sigTF, 0);
       e.tradesToday++;
       return true;
      }
@@ -805,20 +931,22 @@ string EngineLine(Engine &e)
    int d, layers; double avg, lots, lp, pr;
    GetBasket(e, d, layers, avg, lots, lp, pr);
    int tr = TrendDir(e.hTF, e.hTS, e.trendTF);
-   return StringFormat("%-8s: trend %s | %s %d/%d lots %.2f avg %.2f P/L %.2f | TP %.2f SL %.2f | today %d baskets",
+   return StringFormat("%-8s: trend %s | %s %d/%d lots %.2f avg %.2f P/L %.2f | TP %.2f SL %.2f%s | today %d baskets%s",
                        e.name, tr == 1 ? "UP" : (tr == -1 ? "DOWN" : "SIDE"),
                        d == 1 ? "BUY" : (d == -1 ? "SELL" : "-"), layers, e.maxLayers, lots, avg, pr,
-                       e.syncedTP, e.syncedSL, e.basketsToday);
+                       e.syncedTP, e.syncedSL, e.trailActive ? " TRAILING" : "", e.basketsToday,
+                       e.manual ? " | manual ON" : "");
   }
 
 void ShowPanel()
   {
    if(MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE)) return;
    int mt = MasterTrend();
-   string status = dayStopped ? "STOPPED (daily loss)" :
-                   (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "Daily target hit" : "Running");
+   string status = dayStopped ? "STOPPED (daily loss / cutloss)" :
+                   (TimeCurrent() < cutlossUntil ? "CUTLOSS cooldown till " + TimeToString(cutlossUntil, TIME_MINUTES) :
+                   (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "Daily target hit" : "Running"));
    Comment(StringFormat(
-      "GoldDCA_EA v2.00 (Scalp + Intraday) | %s\n"
+      "GoldDCA_EA v2.10 (Scalp + Intraday) | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"

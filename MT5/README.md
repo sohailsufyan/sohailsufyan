@@ -70,3 +70,10 @@
 - Ek engine BUY basket me ho to doosra SELL nahi kholta (`InpNoOpposite`)
 - Daily target 5% / daily loss 15% poore account par (dono engine milake)
 - Sirf ek chahiye to `InpScOn` ya `InpInOn` = false
+
+## v2.10 – naye features
+- **Basket trailing:** TP level aate hi basket close nahi hota, TP ka 50% lock hokar trailing SL chalta hai (broker SL bhi update)
+- **Fixed Add lot:** layer lot = pehla lot + pehla lot x 0.5 x N (multiplier ki jagah seedha badhna)
+- **New candle gate:** ek signal-TF candle me max 1 DCA layer
+- **Cutloss $:** dono engine ka floating loss X $ ho to sab close, 30 min cooldown ke baad resume (ya din band)
+- **Manual trades:** magic 0 wale manual trade Intraday engine ke basket me aa jaate hain, unpar DCA/TP/SL lagta hai
