@@ -148,3 +148,8 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **Liquidity sweep:** swing ya pichle din ke high/low ke paar wick, phir wapas andar close = stop-hunt. `InpRequireSweep = true` karne par entry sirf sweep ke baad
 - **VWAP (aaj ka):** BUY sirf VWAP ke upar, SELL sirf neeche (`InpUseVWAP`). `InpVWAPDCA = true`: DCA layer sirf VWAP band ke bahar (discount/premium zone)
 - Chart: VWAP + bands (neela), swing levels (orange), BOS/CHoCH level, sweep arrow. Panel me Structure / Sweep / VWAP row
+
+## v3.30 – Smart DCA pause + Net profit close
+- **DCA pause:** basket ke khilaf high probability reversal (ulta master trend + ulti direction ka scanner score 75+, ya structure ka ulta CHoCH) aaye to us basket ka DCA ruk jata hai; reversal hatne par phir chalu. Panel: "DCA PAUSED (reversal)"
+- **Net profit close:** 2 ya zyada basket khule hon aur koi loss me ho, to jab saare baskets ka total P/L ≥ max($5, $50 × kul lot) ho jaye, sab positions ek saath profit me close
+- Panel me NET row: kitne baskets, kul lot, net P/L, kis $ par sab close hoga

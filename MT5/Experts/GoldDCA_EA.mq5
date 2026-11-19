@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.20"
+#property version   "3.30"
 
 #include <Trade/Trade.mqh>
 
@@ -144,6 +144,14 @@ input bool            InpAlertPopup       = true;         // Naya HIGH signal: M
 input bool            InpAlertPush        = true;         // Naya HIGH signal: phone push (MT5 app)
 input int             InpAlertGapMin      = 15;           // Do alerts ke beech min gap (minutes)
 
+input group "=== Smart Pause + Net Profit Close ==="
+input bool            InpPauseOnReversal  = true;         // High probability ulta signal aaye to us basket ka DCA pause
+input int             InpReversalScore    = 75;           // Ulti direction ka scanner score itna ya zyada = reversal
+input bool            InpPauseOnCHoCH     = true;         // Structure ulta CHoCH de to bhi DCA pause
+input bool            InpNetClose         = true;         // Saare baskets ka total P/L profit me aaye to sab close
+input double          InpNetCloseUSD      = 5.0;          // Kam se kam itna $ net profit
+input double          InpNetClosePerLot   = 50.0;         // Ya har 1.00 lot par itna $ (jo bada ho)
+
 input group "=== Cutloss ($) ==="
 input double          InpCutlossUSD       = 0.0;          // Dono engine ka floating loss itna $ ho to sab close (0 = off)
 input bool            InpResumeAfterCut   = true;         // true = cooldown ke baad phir shuru, false = din band
@@ -261,6 +269,7 @@ struct Engine
    int               adoptDir;
    int               side;      // 1 = sirf BUY basket, -1 = sirf SELL basket, 0 = dono
    double            maxMove;   // average se sabse zyada favourable move (backup exit ke liye)
+   bool              dcaPaused; // reversal ki wajah se DCA ruka hai
   };
 
 CTrade   trade;
@@ -326,7 +335,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -443,6 +452,7 @@ void OnTick()
    CheckNewDay();
    UpdateNews();
    CheckCutloss();
+   CheckNetClose();
    RecordTick();
 
    for(int k = 0; k < NE; k++)
@@ -709,6 +719,11 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
    if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) return;
    if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > e.maxSpread) return;
    if(InpAddOnlyInTrend && TrendDir(e.hTF, e.hTS, e.trendTF) != dir) return;
+   bool rev = InpPauseOnReversal && ReversalAgainst(dir);
+   if(rev != e.dcaPaused)
+      PrintFormat("[%s] DCA %s", e.name, rev ? "PAUSED - high probability reversal" : "RESUMED");
+   e.dcaPaused = rev;
+   if(rev) return;
 
    double step = BaseStep(e) * MathPow(e.stepGrowth, layers - 1);
    bool add = (dir == 1) ? (ask <= lastPrice - step) : (bid >= lastPrice + step);
@@ -1579,7 +1594,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.20 | %s\n"
+      "GoldDCA_EA v3.30 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1695,6 +1710,7 @@ string EngineState(Engine &e, int layers)
       return "SCANNING";
      }
    if(e.trailActive) return e.booked ? "BOOKED + TRAIL" : "TRAILING";
+   if(e.dcaPaused) return "DCA PAUSED (reversal)";
    if(e.maxLayers > 0 && layers >= e.maxLayers) return "MAX LAYERS";
    return "DCA ACTIVE";
   }
@@ -1729,7 +1745,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.20  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.30  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1809,6 +1825,13 @@ void ShowPanel()
    PText("sesT", 16, y + 4, "Session: " + ses + "   |   next open " + ISTTime(nextH), cTxt, 8);
    PText("news", W - 16, y + 4, newsActive ? "NEWS!" : "News clear", newsActive ? cSell : cBuy, 8, true, ANCHOR_RIGHT_UPPER);
    y += 28;
+   {
+      int nb; double net, lots; NetPL(nb, net, lots);
+      double need = MathMax(InpNetCloseUSD, InpNetClosePerLot * lots);
+      PText("netT", 10, y, nb > 0 ? StringFormat("NET (%d baskets, %.2f lot): %+.2f  |  sab close at +%.2f%s", nb, lots, net, need,
+            (InpNetClose && nb >= 2) ? "" : " (2+ baskets par)") : "NET: no open baskets", net >= 0 ? cBuy : cSell, 8, true);
+      y += 18;
+   }
    PRect("inst", 8, y, W - 16, 38, cCard, cLine);
    string stTxt = stBias == 1 ? "BULLISH" : (stBias == -1 ? "BEARISH" : "-");
    PText("instS", 16, y + 3, "Structure: " + stTxt + (stType != "" ? " (" + stType + ")" : ""), stBias == 1 ? cBuy : (stBias == -1 ? cSell : cDim), 8, true);
@@ -2146,4 +2169,61 @@ void DrawInst()
       ObjectSetString(0, a, OBJPROP_TOOLTIP, swDir == 1 ? "Sell-side liquidity sweep" : "Buy-side liquidity sweep");
      }
    else ObjectDelete(0, a);
+  }
+
+//==================== SMART PAUSE + NET PROFIT CLOSE ====================
+double   revScore[2] = {0, 0};
+datetime revTime[2] = {0, 0};
+
+// Basket ki direction (dir) ke khilaf high probability reversal?
+bool ReversalAgainst(int dir)
+  {
+   int opp = -dir;
+   if(InpPauseOnCHoCH && stBias == opp && stType == "CHoCH") return true;
+   if(!InpUseScanner) return false;
+   if(MasterTrend() != opp) return false;          // ulta trend confirm nahi
+   int ix = opp == 1 ? 0 : 1;
+   if(TimeCurrent() - revTime[ix] >= 10)
+     {
+      ScoreResult r;
+      ScanMarket(opp, r);
+      revScore[ix] = r.total; revTime[ix] = TimeCurrent();
+     }
+   return revScore[ix] >= InpReversalScore;
+  }
+
+void NetPL(int &baskets, double &net, double &lots)
+  {
+   baskets = 0; net = 0; lots = 0;
+   for(int k = 0; k < NE; k++)
+     {
+      if(!InpHedgeMode && k >= NT) continue;
+      int d, l; double a, lt, lp, pr;
+      GetBasket(E[k], d, l, a, lt, lp, pr);
+      if(l > 0) { baskets++; net += pr; lots += lt; }
+     }
+  }
+
+// 2 ya zyada baskets (jaise hedge BUY + SELL, ya paused basket) ka total P/L profit me aaye to sab close
+void CheckNetClose()
+  {
+   if(!InpNetClose) return;
+   int nb; double net, lots;
+   NetPL(nb, net, lots);
+   if(nb < 2) return;
+   bool anyLoss = false;
+   for(int k = 0; k < NE; k++)
+     {
+      if(!InpHedgeMode && k >= NT) continue;
+      int d, l; double a, lt, lp, pr;
+      GetBasket(E[k], d, l, a, lt, lp, pr);
+      if(l > 0 && pr < 0) anyLoss = true;
+     }
+   if(!anyLoss) return;                              // sab profit me hain to apne niyam se nikalenge
+   double need = MathMax(InpNetCloseUSD, InpNetClosePerLot * lots);
+   if(net >= need)
+     {
+      PrintFormat("NET PROFIT CLOSE: %d baskets, net %+.2f >= %.2f - sab positions profit me close", nb, net, need);
+      CloseAllEngines();
+     }
   }
