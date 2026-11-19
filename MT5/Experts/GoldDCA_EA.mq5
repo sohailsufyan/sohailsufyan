@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.60"
+#property version   "3.70"
 
 #include <Trade/Trade.mqh>
 
@@ -743,7 +743,8 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
    if(!e.on || dayStopped || e.trailActive || rtPaused) return;
    if(TimeCurrent() < cutlossUntil) return;
    if(InpFriNoDCA && FridayLate(InpFriHour)) return;
-   if(!AccountRoomOK(LayerLot(e, layers))) return;
+   bool hedgeLayer = ReducesNet(dir, LayerLot(e, layers));
+   if(!hedgeLayer && !AccountRoomOK(LayerLot(e, layers))) return;
    if(e.maxLayers > 0 && layers >= e.maxLayers) return;
    if(InpMaxTotalLots > 0)
      {
@@ -774,7 +775,7 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
    if(!add) return;
 
    double lot = LayerLot(e, layers);
-   if(!MarginOK(dir, lot)) { PrintFormat("[%s] Margin kam - DCA layer skip.", e.name); return; }
+   if(!hedgeLayer && !MarginOK(dir, lot)) { PrintFormat("[%s] Margin kam - DCA layer skip.", e.name); return; }
    if(Open(e, dir, lot, "L" + IntegerToString(layers + 1)))
       PrintFormat("[%s] DCA layer %d @ %.2f, lot %.2f", e.name, layers + 1, dir == 1 ? ask : bid, lot);
   }
@@ -1235,8 +1236,10 @@ void TryNewBasket(Engine &e, int k)
      }
 
    double lot = LayerLot(e, 0);
-   if(!MarginOK(sig, lot)) return;
-   if(!AccountRoomOK(lot)) return;
+   bool hedgeOpen = ReducesNet(sig, lot);       // hedge (net lot ghatata hai) = limit se chhoot
+   if(!hedgeOpen && !MarginOK(sig, lot)) return;
+   if(!hedgeOpen && !AccountRoomOK(lot)) return;
+   if(hedgeOpen && !AccountRoomOK(lot)) PrintFormat("[%s] Limit lagi hai, lekin ye HEDGE hai (net lot ghatega) - khol rahe hain", e.name);
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(Open(e, sig, lot, "L1"))
      {
@@ -1649,7 +1652,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.60 | %s\n"
+      "GoldDCA_EA v3.70 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1800,7 +1803,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.60  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.70  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -2301,6 +2304,31 @@ double AllEALots()
          if(PositionGetTicket(i) != 0 && IsMine(E[k])) l += PositionGetDouble(POSITION_VOLUME);
      }
    return l;
+  }
+
+// Saare EA baskets ka net lot: BUY (+) aur SELL (-)
+double AllEANet()
+  {
+   double net = 0;
+   for(int k = 0; k < NE; k++)
+     {
+      if(!InpHedgeMode && k >= NT) continue;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         if(PositionGetTicket(i) == 0 || !IsMine(E[k])) continue;
+         double v = PositionGetDouble(POSITION_VOLUME);
+         net += (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? v : -v;
+        }
+     }
+   return net;
+  }
+
+// Ye order net exposure kam karega? (= hedge, limits se chhoot)
+bool ReducesNet(int dir, double lot)
+  {
+   if(!InpHedgeMode) return false;
+   double net = AllEANet();
+   return MathAbs(net + dir * lot) < MathAbs(net) - 1e-9;
   }
 
 // Kul lot limit + margin level check (naya basket / layer se pehle)

@@ -160,3 +160,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **Limit:** `InpMaxAllLots` (saare baskets ka kul lot), `InpMinMarginLevel` 150% se kam par naya basket/layer nahi
 - **Telegram:** naya basket, DCA layer, basket close (P/L), net close, cutloss, daily loss, daily report.
   Setup: BotFather se token, @userinfobot se chat ID; MT5 Tools > Options > Expert Advisors > Allow WebRequest: `https://api.telegram.org`
+- v3.70: **Hedge ko limit se chhoot** – jo naya basket ya layer net lot ghatata hai (ulti side ka hedge), wo margin level / kul lot / free margin limit lagne par bhi khul sakta hai; risk badhane wale layer band rehte hain
