@@ -85,3 +85,17 @@
 - DCA step $2 (gap x1.3), max 3 layers, TP 0.8 x M1 ATR (min $0.40), hard stop 4%, cooldown 30 sec
 - Ek M1 candle me max 1 naya basket aur max 1 DCA layer
 - Strategy Tester me **"Every tick based on real ticks"** mode zaroori hai
+
+## v2.30 – Market Scanner (sirf high probability entry)
+Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi entry:
+| Part | Max | Kya check |
+|---|---|---|
+| MTF alignment | 25 | M5, M15, H1, H4, D1 par EMA50/200 trend same direction |
+| Momentum | 15 | H1 RSI zone, M15 MACD histogram, H1 ADX >= 20 + DI |
+| Volatility | 10 | M15 ATR apne 50-bar average ka 0.8x-2x |
+| Session | 10 | London+NY overlap 10, London/NY 7, Asia 3 (`InpServerGMTOffset` set karein) |
+| Liquidity | 15 | PDH/PDL ya swing high/low ka stop-hunt sweep = 15, warna aage S/R tak jagah |
+| Order flow | 15 | Last 60s uptick/downtick pressure + M5 tick volume surge |
+| Cross-asset | 10 | EURUSD (Dollar ulta) + XAGUSD (Silver saath); symbol na mile to neutral |
+- ELITE (85+) par lot x `InpEliteLotMult` (default 1.0)
+- Panel par live score + breakdown; Experts log me har entry/skip ka score

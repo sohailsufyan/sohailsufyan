@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.20"
+#property version   "2.30"
 
 #include <Trade/Trade.mqh>
 
@@ -176,6 +176,16 @@ input bool            InpUseSRFilter      = true;         // S/R ke paas against
 input double          InpSRBlockDist      = 3.0;          // BUY: resistance itne $ upar ho to skip (SELL ulta)
 input int             InpSRMinRank        = 3;            // Filter kin levels par: 7=Y 6=6M 5=3M 4=1M 3=W 2=3D 1=D 0=H4
 
+input group "=== Market Scanner (High Probability only) ==="
+input bool            InpUseScanner       = true;         // Scanner ON - sirf high score par entry
+input int             InpMinScore         = 75;           // Entry ke liye min score (0-100). 75 = HIGH
+input int             InpMedScore         = 60;           // MEDIUM tier (sirf display)
+input int             InpEliteScore       = 85;           // ELITE tier
+input double          InpEliteLotMult     = 1.0;          // ELITE score par lot x (1.0 = same)
+input int             InpServerGMTOffset  = 2;            // Broker server time = GMT + ? (sessions ke liye)
+input string          InpSymDollar        = "EURUSD";     // Dollar proxy symbol (blank = off)
+input string          InpSymSilver        = "XAGUSD";     // Silver symbol (blank = off)
+
 input group "=== Filters ==="
 input int             InpMaxSpreadPoints  = 50;           // Max spread (points)
 input bool            InpUseSession       = true;         // Session filter
@@ -202,6 +212,7 @@ struct Engine
    bool              tickMode, useMACD;
    int               maxSpread;
    string            tag;
+   double            lotScale;
    // state
    datetime          lastSigBar, lastCloseTime, lastLayerTime;
    double            basketStartEq, syncedTP, syncedSL;
@@ -220,6 +231,15 @@ Engine   E[NE];
 double   tkBid[TKBUF];
 long     tkMsc[TKBUF];
 int      tkHead = 0, tkCount = 0;
+
+//--- Scanner
+struct ScoreResult { int total, mtf, mom, vol, ses, liq, flow, cross; };
+ENUM_TIMEFRAMES scTF[5] = {PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1};
+int      hScF[5], hScS[5];
+int      hScRSI = INVALID_HANDLE, hScMACD = INVALID_HANDLE, hScADX = INVALID_HANDLE, hScATR = INVALID_HANDLE;
+int      hDolEMA = INVALID_HANDLE, hSilF = INVALID_HANDLE, hSilS = INVALID_HANDLE;
+string   symDollar = "", symSilver = "";
+ScoreResult lastScan; int lastScanDir = 0; datetime lastScanTime = 0;
 int      hMF = INVALID_HANDLE, hMS = INVALID_HANDLE;
 datetime lastNewsCheck = 0;
 bool     newsActive = false, newsSoon = false, dayStopped = false;
@@ -241,6 +261,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lotFactor = lotF; e.lotMult = lotM; e.stepMode = stepMode; e.step = step; e.stepATR = stepATR;
    e.stepGrowth = growth; e.maxLayers = layers; e.tpMode = tpMode; e.tp = tp; e.tpATR = tpATR; e.tpMin = tpMin;
    e.stopPct = stopPct; e.cooldownSec = cool * 60;
+   e.lotScale = 1.0;
    e.tickMode = false; e.useMACD = InpUseMACD; e.maxSpread = InpMaxSpreadPoints; e.tag = StringSubstr(name, 0, 2); e.maxBaskets = maxB; e.maxATR = maxATR; e.minATR = minATR;
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
@@ -303,6 +324,8 @@ int OnInit()
    if(InpScStopPct <= 0 || InpInStopPct <= 0)
       Print("WARNING: Basket hard stop OFF hai - ek galat trend poora account khatam kar sakta hai!");
 
+   if(!InitScanner()) { Print("Scanner indicator error: ", GetLastError()); return(INIT_FAILED); }
+
    ResetDay();
    UpdateLevels(true);
    return(INIT_SUCCEEDED);
@@ -312,6 +335,10 @@ void OnDeinit(const int reason)
   {
    IndicatorRelease(hMF); IndicatorRelease(hMS);
    for(int k = 0; k < NE; k++) ReleaseEngine(E[k]);
+   for(int i = 0; i < 5; i++) { IndicatorRelease(hScF[i]); IndicatorRelease(hScS[i]); }
+   IndicatorRelease(hScRSI); IndicatorRelease(hScMACD); IndicatorRelease(hScADX); IndicatorRelease(hScATR);
+   if(hDolEMA != INVALID_HANDLE) IndicatorRelease(hDolEMA);
+   if(hSilF != INVALID_HANDLE) { IndicatorRelease(hSilF); IndicatorRelease(hSilS); }
    ObjectsDeleteAll(0, SRPFX);
    Comment("");
   }
@@ -539,7 +566,7 @@ void CloseBasket(Engine &e)
      }
    e.lastCloseTime = TimeCurrent();
    e.syncedTP = 0; e.syncedSL = 0; e.syncedLayers = 0;
-   e.trailActive = false; e.trailSL = 0;
+   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
   }
 
@@ -588,6 +615,262 @@ int TickMomentum(int trend)
    if(trend == 1 && move >= InpTkMinMove) return 1;
    if(trend == -1 && move <= -InpTkMinMove) return 1;
    return 0;
+  }
+
+//==================== MARKET SCANNER ====================
+// Broker suffix ke saath symbol dhoondo (XAUUSDm -> EURUSDm)
+string FindSymbol(string base)
+  {
+   if(base == "") return "";
+   if(SymbolSelect(base, true)) return base;
+   string suffix = "";
+   int p = StringFind(_Symbol, "XAUUSD");
+   if(p >= 0) suffix = StringSubstr(_Symbol, p + 6);
+   string pre = (p > 0) ? StringSubstr(_Symbol, 0, p) : "";
+   string cand = pre + base + suffix;
+   if(cand != base && SymbolSelect(cand, true)) return cand;
+   return "";
+  }
+
+bool InitScanner()
+  {
+   for(int i = 0; i < 5; i++)
+     {
+      hScF[i] = iMA(_Symbol, scTF[i], 50, 0, MODE_EMA, PRICE_CLOSE);
+      hScS[i] = iMA(_Symbol, scTF[i], 200, 0, MODE_EMA, PRICE_CLOSE);
+      if(hScF[i] == INVALID_HANDLE || hScS[i] == INVALID_HANDLE) return false;
+     }
+   hScRSI  = iRSI(_Symbol, PERIOD_H1, 14, PRICE_CLOSE);
+   hScMACD = iMACD(_Symbol, PERIOD_M15, 12, 26, 9, PRICE_CLOSE);
+   hScADX  = iADX(_Symbol, PERIOD_H1, 14);
+   hScATR  = iATR(_Symbol, PERIOD_M15, 14);
+   if(hScRSI == INVALID_HANDLE || hScMACD == INVALID_HANDLE || hScADX == INVALID_HANDLE || hScATR == INVALID_HANDLE)
+      return false;
+
+   symDollar = FindSymbol(InpSymDollar);
+   symSilver = FindSymbol(InpSymSilver);
+   if(symDollar != "") hDolEMA = iMA(symDollar, PERIOD_M15, 21, 0, MODE_EMA, PRICE_CLOSE);
+   if(symSilver != "")
+     {
+      hSilF = iMA(symSilver, PERIOD_H1, 50, 0, MODE_EMA, PRICE_CLOSE);
+      hSilS = iMA(symSilver, PERIOD_H1, 200, 0, MODE_EMA, PRICE_CLOSE);
+     }
+   PrintFormat("Scanner ready. Dollar proxy: %s | Silver: %s",
+               symDollar == "" ? "NOT FOUND (neutral)" : symDollar, symSilver == "" ? "NOT FOUND (neutral)" : symSilver);
+   return true;
+  }
+
+double B1(int h, int buf, int shift)
+  {
+   double a[];
+   ArraySetAsSeries(a, true);
+   if(CopyBuffer(h, buf, shift, 1, a) != 1) return EMPTY_VALUE;
+   return a[0];
+  }
+
+// 1) Multi-timeframe alignment (25): M5, M15, H1, H4, D1 - har ek 5
+int ScoreMTF(int dir)
+  {
+   int pts = 0;
+   for(int i = 0; i < 5; i++)
+     {
+      double f = B1(hScF[i], 0, 1), sl = B1(hScS[i], 0, 1);
+      double c = iClose(_Symbol, scTF[i], 1);
+      if(f == EMPTY_VALUE || sl == EMPTY_VALUE || c == 0) continue;
+      if(dir == 1 && f > sl && c > f) pts += 5;
+      if(dir == -1 && f < sl && c < f) pts += 5;
+     }
+   return pts;
+  }
+
+// 2) Momentum (15): H1 RSI, M15 MACD histogram, H1 ADX + DI
+int ScoreMomentum(int dir)
+  {
+   int pts = 0;
+   double r = B1(hScRSI, 0, 1);
+   if(r != EMPTY_VALUE)
+     {
+      if(dir == 1 && r >= 52 && r <= 72) pts += 5;
+      if(dir == -1 && r <= 48 && r >= 28) pts += 5;
+     }
+   double m0 = B1(hScMACD, 0, 1), s0 = B1(hScMACD, 1, 1), m1 = B1(hScMACD, 0, 2), s1 = B1(hScMACD, 1, 2);
+   if(m0 != EMPTY_VALUE && m1 != EMPTY_VALUE)
+     {
+      double h0 = m0 - s0, h1 = m1 - s1;
+      if(dir == 1 && h0 > 0 && h0 >= h1) pts += 5;
+      if(dir == -1 && h0 < 0 && h0 <= h1) pts += 5;
+     }
+   double adx = B1(hScADX, 0, 1), pdi = B1(hScADX, 1, 1), mdi = B1(hScADX, 2, 1);
+   if(adx != EMPTY_VALUE && adx >= 20)
+     {
+      if(dir == 1 && pdi > mdi) pts += 5;
+      if(dir == -1 && mdi > pdi) pts += 5;
+     }
+   return pts;
+  }
+
+// 3) Volatility (10): M15 ATR apne 50-bar average ke mukable normal ho
+int ScoreVolatility()
+  {
+   double a[];
+   ArraySetAsSeries(a, true);
+   if(CopyBuffer(hScATR, 0, 1, 50, a) != 50) return 0;
+   double avg = 0;
+   for(int i = 0; i < 50; i++) avg += a[i];
+   avg /= 50.0;
+   if(avg <= 0) return 0;
+   double ratio = a[0] / avg;
+   if(ratio >= 0.8 && ratio <= 2.0) return 10;
+   if(ratio >= 0.6 && ratio <= 2.5) return 5;
+   return 0;   // dead market ya pagal volatility
+  }
+
+// 4) Session (10): London/NY overlap best
+int ScoreSession()
+  {
+   MqlDateTime g;
+   TimeToStruct(TimeCurrent() - InpServerGMTOffset * 3600, g);
+   int h = g.hour;
+   bool london = (h >= 7 && h < 16), ny = (h >= 12 && h < 21);
+   if(london && ny) return 10;
+   if(london || ny) return 7;
+   return 3;   // Asia
+  }
+
+// 5) Liquidity (15): stop-hunt sweep ya aage jagah
+int ScoreLiquidity(int dir)
+  {
+   double atr = B1(hScATR, 0, 1);
+   if(atr == EMPTY_VALUE || atr <= 0) return 0;
+   double price = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   // Reference liquidity: previous day H/L + M15 swing (bars 13..60)
+   double pdh = iHigh(_Symbol, PERIOD_D1, 1), pdl = iLow(_Symbol, PERIOD_D1, 1);
+   int hiIdx = iHighest(_Symbol, PERIOD_M15, MODE_HIGH, 48, 13);
+   int loIdx = iLowest(_Symbol, PERIOD_M15, MODE_LOW, 48, 13);
+   double swH = hiIdx >= 0 ? iHigh(_Symbol, PERIOD_M15, hiIdx) : 0;
+   double swL = loIdx >= 0 ? iLow(_Symbol, PERIOD_M15, loIdx) : 0;
+
+   double refs[2];
+   refs[0] = (dir == 1) ? pdl : pdh;
+   refs[1] = (dir == 1) ? swL : swH;
+   for(int r = 0; r < 2; r++)
+     {
+      double lv = refs[r];
+      if(lv <= 0) continue;
+      for(int i = 1; i <= 12; i++)
+        {
+         double lo = iLow(_Symbol, PERIOD_M15, i), hi = iHigh(_Symbol, PERIOD_M15, i), cl = iClose(_Symbol, PERIOD_M15, i);
+         if(dir == 1 && lo < lv && cl > lv && price > lv) return 15;    // sell-side liquidity sweep -> BUY
+         if(dir == -1 && hi > lv && cl < lv && price < lv) return 15;   // buy-side liquidity sweep -> SELL
+        }
+     }
+
+   // Sweep nahi: aage kitni jagah hai (nearest opposing S/R)
+   double nearest = DBL_MAX;
+   for(int i = 0; i < ArraySize(levels); i++)
+     {
+      if(levels[i].rank < 1) continue;
+      double d = levels[i].price - price;
+      if(dir == 1 && d > 0) nearest = MathMin(nearest, d);
+      if(dir == -1 && d < 0) nearest = MathMin(nearest, -d);
+     }
+   if(nearest >= 3.0 * atr) return 10;
+   if(nearest >= 1.5 * atr) return 5;
+   return 0;
+  }
+
+// 6) Order flow (15): tick pressure (last 60s) + tick volume surge
+int ScoreFlow(int dir)
+  {
+   int pts = 0;
+   if(tkCount > 2)
+     {
+      int newest = (tkHead - 1 + TKBUF) % TKBUF;
+      long fromMs = tkMsc[newest] - 60000;
+      int up = 0, dn = 0;
+      for(int i = 0; i < tkCount - 1; i++)
+        {
+         int a = (newest - i + TKBUF) % TKBUF, b = (newest - i - 1 + TKBUF) % TKBUF;
+         if(tkMsc[b] < fromMs) break;
+         if(tkBid[a] > tkBid[b]) up++;
+         else if(tkBid[a] < tkBid[b]) dn++;
+        }
+      int tot = up + dn;
+      if(tot >= 10)
+        {
+         double share = (dir == 1) ? (double)up / tot : (double)dn / tot;
+         if(share >= 0.60) pts += 8;
+         else if(share >= 0.55) pts += 4;
+        }
+     }
+   long v[];
+   ArraySetAsSeries(v, true);
+   if(CopyTickVolume(_Symbol, PERIOD_M5, 1, 21, v) == 21)
+     {
+      double avg = 0;
+      for(int i = 1; i < 21; i++) avg += (double)v[i];
+      avg /= 20.0;
+      double o = iOpen(_Symbol, PERIOD_M5, 1), c = iClose(_Symbol, PERIOD_M5, 1);
+      bool candleOK = (dir == 1) ? c > o : c < o;
+      if(avg > 0 && v[0] > 1.5 * avg && candleOK) pts += 7;
+      else if(avg > 0 && v[0] > 1.2 * avg && candleOK) pts += 3;
+     }
+   return pts;
+  }
+
+// 7) Cross-asset (10): Dollar ulta, Silver saath. Symbol na mile to neutral (half)
+int ScoreCross(int dir)
+  {
+   int pts = 0;
+   if(hDolEMA == INVALID_HANDLE) pts += 2;
+   else
+     {
+      double e = B1(hDolEMA, 0, 1), c = iClose(symDollar, PERIOD_M15, 1);
+      // EURUSD upar = Dollar kamzor = Gold BUY ke liye achha
+      if(e != EMPTY_VALUE && c > 0)
+        {
+         if(dir == 1 && c > e) pts += 5;
+         if(dir == -1 && c < e) pts += 5;
+        }
+     }
+   if(hSilF == INVALID_HANDLE) pts += 2;
+   else
+     {
+      double f = B1(hSilF, 0, 1), sl = B1(hSilS, 0, 1), c = iClose(symSilver, PERIOD_H1, 1);
+      if(f != EMPTY_VALUE && sl != EMPTY_VALUE && c > 0)
+        {
+         if(dir == 1 && f > sl && c > f) pts += 5;
+         if(dir == -1 && f < sl && c < f) pts += 5;
+        }
+     }
+   return pts;
+  }
+
+void ScanMarket(int dir, ScoreResult &r)
+  {
+   r.mtf = ScoreMTF(dir);
+   r.mom = ScoreMomentum(dir);
+   r.vol = ScoreVolatility();
+   r.ses = ScoreSession();
+   r.liq = ScoreLiquidity(dir);
+   r.flow = ScoreFlow(dir);
+   r.cross = ScoreCross(dir);
+   r.total = r.mtf + r.mom + r.vol + r.ses + r.liq + r.flow + r.cross;
+  }
+
+string Tier(int score)
+  {
+   if(score >= InpEliteScore) return "ELITE";
+   if(score >= InpMinScore) return "HIGH";
+   if(score >= InpMedScore) return "MEDIUM";
+   return "LOW";
+  }
+
+string ScoreText(ScoreResult &r)
+  {
+   return StringFormat("[MTF %d/25 MOM %d/15 VOL %d/10 SES %d/10 LIQ %d/15 FLOW %d/15 X %d/10]",
+                       r.mtf, r.mom, r.vol, r.ses, r.liq, r.flow, r.cross);
   }
 
 //==================== CUTLOSS ($) ====================
@@ -654,6 +937,21 @@ void TryNewBasket(Engine &e, int k)
      }
 
    if(InpUseSRFilter && SRBlocked(sig)) return;
+
+   //--- Market Scanner: sirf high probability
+   ScoreResult sc;
+   e.lotScale = 1.0;
+   if(InpUseScanner)
+     {
+      ScanMarket(sig, sc);
+      if(sc.total < InpMinScore)
+        {
+         PrintFormat("[%s] %s skip: score %d < %d  %s", e.name, sig == 1 ? "BUY" : "SELL", sc.total, InpMinScore, ScoreText(sc));
+         return;
+        }
+      if(sc.total >= InpEliteScore) e.lotScale = InpEliteLotMult;
+      PrintFormat("[%s] %s score %d (%s)  %s", e.name, sig == 1 ? "BUY" : "SELL", sc.total, Tier(sc.total), ScoreText(sc));
+     }
 
    double lot = LayerLot(e, 0);
    if(!MarginOK(sig, lot)) return;
@@ -823,7 +1121,7 @@ double LayerLot(Engine &e, int layerIndex)
    if(InpLotMode == LOT_AUTO && InpBalancePerLot > 0)
       base = 0.01 * MathFloor(AccountInfoDouble(ACCOUNT_BALANCE) / InpBalancePerLot);
    if(base <= 0) base = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double first = base * e.lotFactor;
+   double first = base * e.lotFactor * e.lotScale;
    if(InpLotProgression == PROG_FIXED_ADD)
       return NormLot(first + first * InpLotAddFactor * layerIndex);
    return NormLot(first * MathPow(e.lotMult, layerIndex));
@@ -1055,16 +1353,27 @@ void ShowPanel()
    string status = dayStopped ? "STOPPED (daily loss / cutloss)" :
                    (TimeCurrent() < cutlossUntil ? "CUTLOSS cooldown till " + TimeToString(cutlossUntil, TIME_MINUTES) :
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "Daily target hit" : "Running"));
+   string scanLine = "Scanner   : OFF";
+   if(InpUseScanner)
+     {
+      int sd = (mt != 0) ? mt : 1;
+      if(sd != lastScanDir || TimeCurrent() - lastScanTime >= 5)
+        { ScanMarket(sd, lastScan); lastScanDir = sd; lastScanTime = TimeCurrent(); }
+      scanLine = StringFormat("Scanner   : %s score %d/100 = %s (entry %d+)  %s",
+                              sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
+     }
    Comment(StringFormat(
-      "GoldDCA_EA v2.20 (Scalp + Intraday + Tick M1) | %s\n"
+      "GoldDCA_EA v2.30 (Scalp + Intraday + Tick M1 + Scanner) | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
+      "%s\n"
       "%s\n%s\n%s\n"
       "Today P/L : %.2f%%  (target %.1f%%, max loss %.1f%%)  trades %d",
       _Symbol, status, EnumToString(InpMasterTF),
       mt == 1 ? "UP - sirf BUY" : (mt == -1 ? "DOWN - sirf SELL" : "SIDEWAYS - no entry"),
       newsActive ? "HIGH IMPACT - paused" : "Clear",
+      scanLine,
       EngineLine(E[0]), EngineLine(E[1]), EngineLine(E[2]),
       DayPLPct(), InpDailyTargetPct, InpDailyLossPct, E[0].tradesToday + E[1].tradesToday + E[2].tradesToday));
   }
