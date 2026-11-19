@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.30"
+#property version   "3.40"
 
 #include <Trade/Trade.mqh>
 
@@ -152,6 +152,15 @@ input bool            InpNetClose         = true;         // Saare baskets ka to
 input double          InpNetCloseUSD      = 5.0;          // Kam se kam itna $ net profit
 input double          InpNetClosePerLot   = 50.0;         // Ya har 1.00 lot par itna $ (jo bada ho)
 
+input group "=== Early Escape: fasne ka khatra dikhe to profit me nikal jao ==="
+input bool            InpEscape           = true;         // Early escape ON
+input int             InpEscapeScore      = 60;           // Ulti direction ka score itna (MEDIUM) + ulta trend/structure = khatra
+input int             InpEscapeLayers     = 4;            // Itne layers ho gaye = khatra (0 = off)
+input double          InpEscapeHours      = 6.0;          // Basket itne ghante purana = khatra (0 = off)
+input double          InpEscapeDDPct      = 5.0;          // Basket loss equity ka itna % = khatra (0 = off)
+input bool            InpEscapeOnNews     = true;         // High-impact news aane wali = khatra
+input double          InpEscapeBuffer     = 0.2;          // Khatre me: average se itna $ profit aate hi poora basket close
+
 input group "=== Cutloss ($) ==="
 input double          InpCutlossUSD       = 0.0;          // Dono engine ka floating loss itna $ ho to sab close (0 = off)
 input bool            InpResumeAfterCut   = true;         // true = cooldown ke baad phir shuru, false = din band
@@ -270,6 +279,7 @@ struct Engine
    int               side;      // 1 = sirf BUY basket, -1 = sirf SELL basket, 0 = dono
    double            maxMove;   // average se sabse zyada favourable move (backup exit ke liye)
    bool              dcaPaused; // reversal ki wajah se DCA ruka hai
+   string            escReason; // early escape ka kaaran ("" = koi khatra nahi)
   };
 
 CTrade   trade;
@@ -335,7 +345,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false; e.escReason = "";
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -587,6 +597,22 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
 
    if(InpBrokerSLTP) SyncSLTP(e, dir, layers, avg);
 
+   //--- 0) Early escape: thoda bhi khatra dikhe to pehle chhote profit par poora basket bahar
+   string why = InpEscape ? EscapeReason(e, dir, layers, profit) : "";
+   if(why != e.escReason && why != "")
+      PrintFormat("[%s] ESCAPE mode (%s): profit aate hi bahar", e.name, why);
+   e.escReason = why;
+   if(why != "" && !e.trailActive)
+     {
+      double mv = (dir == 1) ? bid - avg : avg - ask;
+      if(profit > 0 && mv >= InpEscapeBuffer)
+        {
+         PrintFormat("[%s] ESCAPE EXIT (%s): %d layers, profit %.2f", e.name, why, layers, profit);
+         CloseBasket(e);
+         return;
+        }
+     }
+
    //--- 1a) Fixed $ exit: +$3 par +$1 lock, phir $2 trailing, +$5 par close
    if(InpFxExit)
      {
@@ -723,6 +749,7 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
    if(rev != e.dcaPaused)
       PrintFormat("[%s] DCA %s", e.name, rev ? "PAUSED - high probability reversal" : "RESUMED");
    e.dcaPaused = rev;
+   if(!rev && (StringFind(e.escReason, "reversal") >= 0 || StringFind(e.escReason, "news") >= 0)) return;   // khatre me DCA nahi
    if(rev) return;
 
    double step = BaseStep(e) * MathPow(e.stepGrowth, layers - 1);
@@ -750,7 +777,7 @@ void CloseBasket(Engine &e)
      }
    e.lastCloseTime = TimeCurrent();
    e.syncedTP = 0; e.syncedSL = 0; e.syncedLayers = 0;
-   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0; e.booked = false; e.maxMove = 0;
+   e.trailActive = false; e.trailSL = 0; e.lotScale = 1.0; e.booked = false; e.maxMove = 0; e.escReason = "";
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
   }
 
@@ -1594,7 +1621,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.30 | %s\n"
+      "GoldDCA_EA v3.40 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1711,6 +1738,7 @@ string EngineState(Engine &e, int layers)
      }
    if(e.trailActive) return e.booked ? "BOOKED + TRAIL" : "TRAILING";
    if(e.dcaPaused) return "DCA PAUSED (reversal)";
+   if(e.escReason != "") return "ESCAPE: " + e.escReason;
    if(e.maxLayers > 0 && layers >= e.maxLayers) return "MAX LAYERS";
    return "DCA ACTIVE";
   }
@@ -1745,7 +1773,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.30  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.40  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -2226,4 +2254,51 @@ void CheckNetClose()
       PrintFormat("NET PROFIT CLOSE: %d baskets, net %+.2f >= %.2f - sab positions profit me close", nb, net, need);
       CloseAllEngines();
      }
+  }
+
+//==================== EARLY ESCAPE ====================
+double   oppScore[2] = {0, 0};
+datetime oppTime[2]  = {0, 0};
+
+int OppScore(int opp)
+  {
+   int ix = opp == 1 ? 0 : 1;
+   if(TimeCurrent() - oppTime[ix] >= 10)
+     {
+      ScoreResult r;
+      ScanMarket(opp, r);
+      oppScore[ix] = r.total; oppTime[ix] = TimeCurrent();
+     }
+   return (int)oppScore[ix];
+  }
+
+datetime BasketStart(Engine &e)
+  {
+   datetime t0 = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(PositionGetTicket(i) == 0 || !IsMine(e)) continue;
+      datetime t = (datetime)PositionGetInteger(POSITION_TIME);
+      if(t0 == 0 || t < t0) t0 = t;
+     }
+   return t0;
+  }
+
+// "" = sab theek; warna khatre ka kaaran
+string EscapeReason(Engine &e, int dir, int layers, double profit)
+  {
+   int opp = -dir;
+   if(e.dcaPaused) return "reversal";
+   if(InpUseScanner && (MasterTrend() == opp || stBias == opp) && OppScore(opp) >= InpEscapeScore)
+      return "reversal risk";
+   if(InpEscapeOnNews && InpUseNews && newsSoon) return "news";
+   if(InpEscapeLayers > 0 && layers >= InpEscapeLayers) return StringFormat("%d layers", layers);
+   if(InpEscapeDDPct > 0 && profit < 0 && e.basketStartEq > 0 && -profit / e.basketStartEq * 100.0 >= InpEscapeDDPct)
+      return "drawdown";
+   if(InpEscapeHours > 0)
+     {
+      datetime t0 = BasketStart(e);
+      if(t0 > 0 && (TimeCurrent() - t0) >= InpEscapeHours * 3600) return "old basket";
+     }
+   return "";
   }

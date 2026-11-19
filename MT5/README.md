@@ -153,3 +153,12 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **DCA pause:** basket ke khilaf high probability reversal (ulta master trend + ulti direction ka scanner score 75+, ya structure ka ulta CHoCH) aaye to us basket ka DCA ruk jata hai; reversal hatne par phir chalu. Panel: "DCA PAUSED (reversal)"
 - **Net profit close:** 2 ya zyada basket khule hon aur koi loss me ho, to jab saare baskets ka total P/L ≥ max($5, $50 × kul lot) ho jaye, sab positions ek saath profit me close
 - Panel me NET row: kitne baskets, kul lot, net P/L, kis $ par sab close hoga
+
+## v3.40 – Early Escape (fasne se pehle profit me bahar)
+Basket me inme se koi bhi khatra dikhe to **ESCAPE mode**: average se sirf **+$0.20** profit aate hi poora basket close (+$3/+$5 ka intezaar nahi):
+- Ulti direction ka score 60+ (MEDIUM) aur trend ya structure ulta (reversal risk) – DCA bhi ruk jata hai
+- High-impact news aane wali – DCA bhi ruk jata hai
+- 4 ya zyada layers ho gaye
+- Basket 6 ghante se purana
+- Basket ka loss equity ka 5%+
+Panel: "ESCAPE: <kaaran>". Inputs: `InpEscape*`
