@@ -1,0 +1,221 @@
+//@version=5
+// GoldDCA_EA (Intraday engine + Market Scanner) - TradingView backtest port
+// Chart: OANDA:XAUUSD 15m. Approximation of the MT5 EA (no tick data, no news filter).
+strategy("GoldDCA Intraday BT", overlay=true, pyramiding=25, initial_capital=20000,
+     default_qty_type=strategy.fixed, commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.15, margin_long=0.2, margin_short=0.2, calc_on_every_tick=false)
+
+trendTF    = input.timeframe("60", "Trend / master TF")
+stepUSD    = input.float(11.0, "DCA step $")
+stepGrowth = input.float(1.0, "Step growth")
+maxLayers  = input.int(25, "Max layers (cap)")
+tpATR      = input.float(0.5, "TP ATR x")
+tpMin      = input.float(1.5, "TP min $")
+stopPct    = input.float(15.0, "Basket hard stop % equity")
+lotAdd     = input.float(0.0, "Fixed-add factor")
+fixedLot   = input.float(0.1, "Fixed lot (0 = auto)")
+bookPct    = input.float(50, "Book % at TP")
+beExit     = input.bool(true, "Breakeven exit")
+beLayers   = input.int(3, "BE min layers")
+beBuf      = input.float(0.5, "BE buffer $")
+balPerLot  = input.float(1000, "Balance per 0.01 lot")
+useScanner = input.bool(true, "Use scanner")
+minScore   = input.int(75, "Min score")
+useTrail   = input.bool(true, "Basket trailing")
+trailLock  = input.float(50, "Trail lock % of TP")
+trailMult  = input.float(1.0, "Trail distance x TP")
+dayTarget  = input.float(5.0, "Daily target %")
+dayLoss    = input.float(15.0, "Daily loss %")
+atrMax     = input.float(15.0, "ATR max $")
+atrMin     = input.float(1.0, "ATR min $")
+srDist     = input.float(3.0, "S/R block distance $")
+sesStartU  = input.int(0, "Session start (UTC)")
+sesEndU    = input.int(20, "Session end (UTC)")
+
+tid = syminfo.tickerid
+
+f_trend() =>
+    e50 = ta.ema(close, 50)
+    e200 = ta.ema(close, 200)
+    e50 > e200 and close > e50 ? 1 : e50 < e200 and close < e50 ? -1 : 0
+
+htf(tf) => request.security(tid, tf, f_trend()[1], lookahead=barmerge.lookahead_on)
+
+// ---- trends
+master  = htf(trendTF)
+trM5    = request.security(tid, "5", f_trend())
+trM15   = f_trend()
+trH1    = htf("60")
+trH4    = htf("240")
+trD1    = htf("D")
+
+// ---- signal TF indicators (chart = M15)
+ema9  = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+rsi   = ta.rsi(close, 14)
+[macdL, sigL, histL] = ta.macd(close, 12, 26, 9)
+atr   = ta.atr(14)
+
+// ---- HTF helpers
+rsiH1 = request.security(tid, "60", ta.rsi(close, 14)[1], lookahead=barmerge.lookahead_on)
+f_dmi() =>
+    [p, m, a] = ta.dmi(14, 14)
+    [p, m, a]
+[diP, diM, adx] = request.security(tid, "60", f_dmi(), lookahead=barmerge.lookahead_on)
+pdh = request.security(tid, "D", high[1], lookahead=barmerge.lookahead_on)
+pdl = request.security(tid, "D", low[1], lookahead=barmerge.lookahead_on)
+pwh = request.security(tid, "W", high[1], lookahead=barmerge.lookahead_on)
+pwl = request.security(tid, "W", low[1], lookahead=barmerge.lookahead_on)
+pwo = request.security(tid, "W", open[1], lookahead=barmerge.lookahead_on)
+pwc = request.security(tid, "W", close[1], lookahead=barmerge.lookahead_on)
+pmh = request.security(tid, "M", high[1], lookahead=barmerge.lookahead_on)
+pml = request.security(tid, "M", low[1], lookahead=barmerge.lookahead_on)
+pmo = request.security(tid, "M", open[1], lookahead=barmerge.lookahead_on)
+pmc = request.security(tid, "M", close[1], lookahead=barmerge.lookahead_on)
+eu    = request.security("FX:EURUSD", timeframe.period, close)
+euEma = request.security("FX:EURUSD", timeframe.period, ta.ema(close, 21))
+silTr = request.security("TVC:SILVER", "60", f_trend()[1], lookahead=barmerge.lookahead_on)
+
+// ---- scanner
+scoreFor(d) =>
+    mtf = (trM5 == d ? 5 : 0) + (trM15 == d ? 5 : 0) + (trH1 == d ? 5 : 0) + (trH4 == d ? 5 : 0) + (trD1 == d ? 5 : 0)
+    mom = 0
+    mom += (d == 1 and rsiH1 >= 52 and rsiH1 <= 72) or (d == -1 and rsiH1 <= 48 and rsiH1 >= 28) ? 5 : 0
+    mom += (d == 1 and histL > 0 and histL >= histL[1]) or (d == -1 and histL < 0 and histL <= histL[1]) ? 5 : 0
+    mom += adx >= 20 and ((d == 1 and diP > diM) or (d == -1 and diM > diP)) ? 5 : 0
+    ratio = atr / ta.sma(atr, 50)
+    vol = ratio >= 0.8 and ratio <= 2.0 ? 10 : ratio >= 0.6 and ratio <= 2.5 ? 5 : 0
+    h = hour(time_close, "UTC")
+    lon = h >= 7 and h < 16
+    ny  = h >= 12 and h < 21
+    ses = lon and ny ? 10 : lon or ny ? 7 : 3
+    swH = ta.highest(high, 48)[13]
+    swL = ta.lowest(low, 48)[13]
+    liq = 0
+    for i = 0 to 11
+        if d == 1 and ((low[i] < pdl and close[i] > pdl and close > pdl) or (low[i] < swL and close[i] > swL and close > swL))
+            liq := 15
+        if d == -1 and ((high[i] > pdh and close[i] < pdh and close < pdh) or (high[i] > swH and close[i] < swH and close < swH))
+            liq := 15
+    if liq == 0
+        lv = array.from(pdh, pdl, pwh, pwl, pwo, pwc, pmh, pml, pmo, pmc)
+        nearest = 1e9
+        for x in lv
+            dd = x - close
+            if d == 1 and dd > 0
+                nearest := math.min(nearest, dd)
+            if d == -1 and dd < 0
+                nearest := math.min(nearest, -dd)
+        liq := nearest >= 3 * atr ? 10 : nearest >= 1.5 * atr ? 5 : 0
+    vavg = ta.sma(volume[1], 20)
+    candleOK = d == 1 ? close > open : close < open
+    flow = 4 + (volume > 1.5 * vavg and candleOK ? 7 : volume > 1.2 * vavg and candleOK ? 3 : 0)   // tick pressure n/a -> neutral 4
+    cross = (d == 1 and eu > euEma) or (d == -1 and eu < euEma) ? 5 : 0
+    cross += silTr == d ? 5 : 0
+    mtf + mom + vol + ses + liq + flow + cross
+
+scoreBuy  = scoreFor(1)
+scoreSell = scoreFor(-1)
+
+// ---- S/R filter (week & month levels)
+srBlocked(d) =>
+    lv = array.from(pwh, pwl, pwo, pwc, pmh, pml, pmo, pmc)
+    b = false
+    for x in lv
+        dd = x - close
+        if d == 1 and dd > 0 and dd <= srDist
+            b := true
+        if d == -1 and dd < 0 and -dd <= srDist
+            b := true
+    b
+
+// ---- entry signal (Intraday engine)
+sigBuy  = master == 1 and ema9 > ema21 and close > ema9 and close > open and rsi >= 50 and rsi <= 72 and macdL > sigL and histL >= histL[1] and macdL > 0
+sigSell = master == -1 and ema9 < ema21 and close < ema9 and close < open and rsi >= 28 and rsi <= 50 and macdL < sigL and histL <= histL[1] and macdL < 0
+atrOK = atr <= atrMax and atr >= atrMin
+hU = hour(time_close, "UTC")
+dow = dayofweek(time_close, "UTC")
+sesOK = hU >= sesStartU and hU < sesEndU and not (dow == dayofweek.friday and hU >= 18)
+
+// ---- daily limits
+var float dayStartEq = strategy.initial_capital
+var bool dayStopped = false
+newDay = ta.change(time("D")) != 0
+if newDay and strategy.position_size == 0
+    dayStartEq := strategy.equity
+    dayStopped := false
+dayPL = (strategy.equity - dayStartEq) / dayStartEq * 100
+if not dayStopped and dayPL <= -dayLoss
+    strategy.close_all("DailyLoss")
+    dayStopped := true
+
+// ---- lots (oz: 1 lot = 100)
+bal = strategy.initial_capital + strategy.netprofit
+baseLot = fixedLot > 0 ? fixedLot : math.max(0.01, math.floor(bal / balPerLot) * 0.01)
+layerQty(n) => math.max(1.0, math.floor(baseLot * (1 + lotAdd * n) * 100))
+
+// ---- basket state
+var float basketStartEq = strategy.initial_capital
+var bool trailOn = false
+var float trailSL = na
+pos = strategy.position_size
+layers = strategy.opentrades
+if pos == 0
+    trailOn := false
+    trailSL := na
+    strategy.cancel_all()
+
+// new basket
+canNew = pos == 0 and not dayStopped and dayPL < dayTarget and sesOK and atrOK
+if canNew
+    if sigBuy and (not useScanner or scoreBuy >= minScore) and not srBlocked(1)
+        basketStartEq := strategy.equity
+        strategy.entry("L1", strategy.long, qty=layerQty(0))
+    else if sigSell and (not useScanner or scoreSell >= minScore) and not srBlocked(-1)
+        basketStartEq := strategy.equity
+        strategy.entry("L1", strategy.short, qty=layerQty(0))
+
+// manage basket
+if pos != 0
+    d = pos > 0 ? 1 : -1
+    avg = strategy.position_avg_price
+    qtyAbs = math.abs(pos)
+    tpDist = math.max(atr * tpATR, tpMin)
+    tpPrice = avg + d * tpDist
+    hardSL = avg - d * (basketStartEq * stopPct / 100) / qtyAbs
+    if useTrail
+        if not trailOn and ((d == 1 and high >= tpPrice) or (d == -1 and low <= tpPrice))
+            trailOn := true
+            trailSL := avg + d * tpDist * trailLock / 100
+            if bookPct > 0
+                target = qtyAbs * bookPct / 100
+                closed = 0.0
+                for i = 0 to strategy.opentrades - 1
+                    sz = math.abs(strategy.opentrades.size(i))
+                    if closed < target
+                        q = math.min(sz, math.floor(target - closed))
+                        if q >= 1
+                            strategy.close(strategy.opentrades.entry_id(i), qty=q, comment="Book")
+                            closed += q
+        if trailOn
+            cand = d == 1 ? high - tpDist * trailMult : low + tpDist * trailMult
+            trailSL := d == 1 ? math.max(trailSL, cand) : math.min(trailSL, cand)
+    if beExit and not trailOn and layers >= beLayers and ((d == 1 and close >= avg + beBuf) or (d == -1 and close <= avg - beBuf))
+        strategy.close_all("BE")
+    stopPx = trailOn ? trailSL : hardSL
+    limPx  = useTrail ? na : tpPrice
+    strategy.exit("X", stop=stopPx, limit=limPx)
+
+    // DCA layer (limit order at next level, 1 per bar)
+    lastPx = strategy.opentrades.entry_price(layers - 1)
+    nextId = "L" + str.tostring(layers + 1)
+    canAdd = layers < maxLayers and not trailOn and not dayStopped and master == d
+    if canAdd
+        step = stepUSD * math.pow(stepGrowth, layers - 1)
+        nextPx = lastPx - d * step
+        strategy.entry(nextId, d == 1 ? strategy.long : strategy.short, qty=layerQty(layers), limit=nextPx)
+    else
+        strategy.cancel(nextId)
+
+plot(useScanner ? scoreBuy : na, "Score BUY", display=display.data_window)
+plot(useScanner ? scoreSell : na, "Score SELL", display=display.data_window)

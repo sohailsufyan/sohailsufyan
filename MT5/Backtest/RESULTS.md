@@ -18,3 +18,21 @@
 | Buy & hold same period | -11.4% | -10.9% |
 
 Average ≈ 3.3% per month (compounded) with scanner ON.
+
+## Run 2 – $20,000 account, fixed 0.1 lot per layer, $11 DCA (unlimited), 50% book + trailing, breakeven exit
+Script: `GoldDCA_Fixed01_BT.pine` (OANDA:XAUUSD 15m, 2025-11-19 → 2026-11-19)
+
+| Metric | Value |
+|---|---|
+| Net profit | **+$10,724 (+53.6%)** ≈ $894/month, ~3.6%/month compounded |
+| Max drawdown | **$4,398 (15.5%)** |
+| Profit factor | 2.53 |
+| Win rate (per fill) | 74.7% |
+| Avg win / avg loss | $53.09 / $62.03 |
+| Largest single loss / win | $403 / $482 |
+| Max position | 0.90 lot (9 layers ≈ $90-99 against) |
+| Longs / Shorts net | +$3,162 (PF 1.84) / +$7,562 (PF 3.31) |
+| Commission | $860 |
+| Buy & hold | -11.7% |
+
+Hard stop 15% vs 65%: identical result – the hard stop never triggered in these 12 months.
