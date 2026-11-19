@@ -168,3 +168,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Hedge basket ka apna exit ($3 lock / $5 TP) + **net close** dono basket ko saath profit me nikalta hai
 - Hedge margin/lot limit se chhoot paata hai (net lot ghatata hai)
 - v3.81: panel engine row me **agla DCA price** aur **DCA kyun nahi juda** ka kaaran (waiting $11, reversal pause, spread, next candle, margin/lot limit, Friday late, trailing ...)
+- v3.82: fix – SL/TP price ke paas ho to SL kabhi 0 nahi hota (purana SL rehta hai), broker freeze level ka dhyan, already-closed position par close error nahi

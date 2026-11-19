@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.81"
+#property version   "3.82"
 
 #include <Trade/Trade.mqh>
 
@@ -814,7 +814,9 @@ void CloseBasket(Engine &e)
         {
          ulong t = PositionGetTicket(i);
          if(t == 0) continue;
-         if(IsMine(e)) trade.PositionClose(t);
+         if(!IsMine(e)) continue;
+         if(!PositionSelectByTicket(t)) continue;     // broker ne SL/TP se pehle hi band kar diya
+         trade.PositionClose(t);
         }
       if(CountLayers(e) == 0) break;
      }
@@ -1340,7 +1342,10 @@ double TPDist(Engine &e)
 void SyncSLTP(Engine &e, int dir, int layers, double avg)
   {
    int    digits  = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   double minStop = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point + 5 * _Point;
+   long   stopsLvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long   freezeLvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   double minStop = (double)MathMax(stopsLvl, freezeLvl) * _Point + 5 * _Point;
+   double freeze  = (double)freezeLvl * _Point + 2 * _Point;
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
    double totalLots = 0;
@@ -1371,16 +1376,9 @@ void SyncSLTP(Engine &e, int dir, int layers, double avg)
       if(!InpFxExit) tp = 0;   // ATR mode: trailing chal raha hai - TP hata do; Fixed mode: +$5 TP rehta hai
       sl = NormalizeDouble(e.trailSL, digits);
      }
-   if(dir == 1)
-     {
-      if(tp > 0 && tp - ask < minStop) tp = 0;
-      if(sl > 0 && bid - sl < minStop) sl = 0;
-     }
-   else
-     {
-      if(tp > 0 && bid - tp < minStop) tp = 0;
-      if(sl > 0 && sl - ask < minStop) sl = 0;
-     }
+   // Price ke bahut paas wala SL/TP broker reject karta hai: tab naya value mat bhejo, purana rehne do (0 kabhi nahi)
+   bool tpOK = tp > 0 && ((dir == 1) ? (tp - ask >= minStop) : (bid - tp >= minStop));
+   bool slOK = sl > 0 && ((dir == 1) ? (bid - sl >= minStop) : (sl - ask >= minStop));
 
    bool changed = (layers != e.syncedLayers) || MathAbs(tp - e.syncedTP) > 50 * _Point || MathAbs(sl - e.syncedSL) > 20 * _Point;
    if(!changed) return;
@@ -1392,8 +1390,13 @@ void SyncSLTP(Engine &e, int dir, int layers, double avg)
       if(t == 0) continue;
       if(!IsMine(e)) continue;
       double curSL = PositionGetDouble(POSITION_SL), curTP = PositionGetDouble(POSITION_TP);
-      if(MathAbs(curSL - sl) < _Point && MathAbs(curTP - tp) < _Point) continue;
-      trade.PositionModify(t, sl, tp);
+      double px = (dir == 1) ? bid : ask;
+      // freeze zone: purana SL/TP price ke itna paas hai ki broker modify nahi karne dega
+      if((curSL > 0 && MathAbs(px - curSL) <= freeze) || (curTP > 0 && MathAbs(px - curTP) <= freeze)) continue;
+      double nSL = slOK ? sl : curSL;
+      double nTP = tpOK ? tp : curTP;
+      if(MathAbs(curSL - nSL) < _Point && MathAbs(curTP - nTP) < _Point) continue;
+      trade.PositionModify(t, nSL, nTP);
      }
    e.syncedTP = tp; e.syncedSL = sl; e.syncedLayers = layers;
   }
@@ -1671,7 +1674,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.81 | %s\n"
+      "GoldDCA_EA v3.82 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1822,7 +1825,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.81  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.82  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
