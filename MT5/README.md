@@ -121,3 +121,8 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **Lot − / +:** lot 0.5x se 10x (0.5 ke step me)
 - **CLOSE ALL EA TRADES:** confirm ke baad saare EA baskets close
 - Button settings restart ke baad bhi yaad rehti hain
+
+## v2.80 – Hard stop 80% (customisable)
+- Default hard stop: Scalp / Intraday / Tick = **80% equity**, daily loss limit = **80%**
+- Panel buttons: **Hard SL − / +** (5% step, sab engines) aur **Day loss − / +** (5% step); restart ke baad bhi yaad
+- WARNING: 80% par ek bura basket account ka 80% le sakta hai

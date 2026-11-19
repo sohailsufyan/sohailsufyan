@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.70"
+#property version   "2.80"
 
 #include <Trade/Trade.mqh>
 
@@ -52,7 +52,7 @@ input ENUM_TP_MODE    InpScTPMode         = TP_ATR;           // Scalp TP mode
 input double          InpScTP             = 1.0;              // Scalp fixed TP ($ from average)
 input double          InpScTP_ATR         = 0.6;              // Scalp TP ATR x
 input double          InpScTPMin          = 0.8;              // Scalp min TP ($)
-input double          InpScStopPct        = 10.0;              // Scalp basket hard stop (% equity)
+input double          InpScStopPct        = 80.0;              // Scalp basket hard stop (% equity)
 input int             InpScCooldownMin    = 2;                // Scalp cooldown (min)
 input int             InpScMaxBaskets     = 30;               // Scalp max baskets/day
 input double          InpScMaxATR         = 8.0;              // Scalp: signal ATR max ($)
@@ -73,7 +73,7 @@ input ENUM_TP_MODE    InpInTPMode         = TP_ATR;           // Intraday TP mod
 input double          InpInTP             = 2.0;              // Intraday fixed TP ($ from average)
 input double          InpInTP_ATR         = 0.5;              // Intraday TP ATR x
 input double          InpInTPMin          = 1.5;              // Intraday min TP ($)
-input double          InpInStopPct        = 15.0;             // Intraday basket hard stop (% equity)
+input double          InpInStopPct        = 80.0;             // Intraday basket hard stop (% equity)
 input int             InpInCooldownMin    = 5;                // Intraday cooldown (min)
 input int             InpInMaxBaskets     = 20;               // Intraday max baskets/day
 input double          InpInMaxATR         = 15.0;             // Intraday: signal ATR max ($)
@@ -100,7 +100,7 @@ input ENUM_TP_MODE    InpTkTPMode         = TP_ATR;           // Tick TP mode
 input double          InpTkTP             = 0.5;              // Tick fixed TP ($ from average)
 input double          InpTkTP_ATR         = 0.8;              // Tick TP M1 ATR x
 input double          InpTkTPMin          = 0.4;              // Tick min TP ($)
-input double          InpTkStopPct        = 8.0;              // Tick basket hard stop (% equity)
+input double          InpTkStopPct        = 80.0;              // Tick basket hard stop (% equity)
 input int             InpTkCooldownSec    = 30;               // Tick cooldown (seconds)
 input int             InpTkMaxBaskets     = 60;               // Tick max baskets/day
 input double          InpTkMaxATR         = 4.0;              // Tick: M1 ATR max ($)
@@ -143,7 +143,7 @@ input bool            InpManualAnyMagic   = false;        // true = doosre EA ke
 
 input group "=== Daily Limits (account) ==="
 input double          InpDailyTargetPct   = 5.0;          // Daily target % - hit hone par naye basket band
-input double          InpDailyLossPct     = 15.0;         // Daily max loss % - sab close, din band
+input double          InpDailyLossPct     = 80.0;         // Daily max loss % - sab close, din band (hard stop se kam rakhoge to pehle yahi lagega)
 
 input group "=== Entry Indicators (shared) ==="
 input int             InpTrendFastEMA     = 50;           // Engine trend TF fast EMA
@@ -270,6 +270,7 @@ datetime lastLevelsBar = 0, lastLevelsTry = 0;
 bool     rtPaused = false;
 int      rtSide = 0;          // 0 = BUY+SELL, 1 = BUY only, -1 = SELL only
 double   rtLotMult = 1.0;     // lot multiplier
+double   rtDayLoss = -1;      // runtime daily loss % (-1 = input)
 string   gvCtl = "";
 
 bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES sig, ENUM_TIMEFRAMES tr,
@@ -412,10 +413,10 @@ void CheckNewDay()
       ResetDay();
 
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   if(!dayStopped && dayStartEq > 0 && InpDailyLossPct > 0 &&
-      (dayStartEq - eq) / dayStartEq * 100.0 >= InpDailyLossPct)
+   if(!dayStopped && dayStartEq > 0 && DayLossPct() > 0 &&
+      (dayStartEq - eq) / dayStartEq * 100.0 >= DayLossPct())
      {
-      PrintFormat("Daily loss %.1f%% hit - sab close, aaj trading band.", InpDailyLossPct);
+      PrintFormat("Daily loss %.1f%% hit - sab close, aaj trading band.", DayLossPct());
       CloseAllEngines();
       dayStopped = true;
      }
@@ -1454,7 +1455,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.70 | %s\n"
+      "GoldDCA_EA v2.80 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1466,7 +1467,7 @@ void ShowTextPanel()
       newsActive ? "HIGH IMPACT - paused" : "Clear",
       scanLine,
       EngineLine(E[0]), EngineLine(E[1]), EngineLine(E[2]),
-      DayPLPct(), InpDailyTargetPct, InpDailyLossPct, E[0].tradesToday + E[1].tradesToday + E[2].tradesToday));
+      DayPLPct(), InpDailyTargetPct, DayLossPct(), E[0].tradesToday + E[1].tradesToday + E[2].tradesToday));
   }
 //+------------------------------------------------------------------+
 
@@ -1547,6 +1548,8 @@ string ISTTime(int gmtHour)
    return StringFormat("%02d:%02d IST", mins / 60, mins % 60);
   }
 
+double DayLossPct() { return rtDayLoss >= 0 ? rtDayLoss : InpDailyLossPct; }
+
 string MaxStr(int m) { return m > 0 ? IntegerToString(m) : "unlimited"; }
 int DcaShow() { return InpInMaxLayers > 0 ? (int)MathMin(4, InpInMaxLayers - 1) : 4; }
 
@@ -1595,7 +1598,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.70  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v2.80  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1699,7 +1702,7 @@ void ShowPanel()
    int trades = 0;
    for(int k = 0; k < NE; k++) trades += E[k].tradesToday;
    double dpl = DayPLPct();
-   PText("today", 10, y + 2, StringFormat("Today: %+.2f%%  (target %.0f%% | max loss %.0f%%)  |  %d trades", dpl, InpDailyTargetPct, InpDailyLossPct, trades),
+   PText("today", 10, y + 2, StringFormat("Today: %+.2f%%  (target %.0f%% | max loss %.0f%%)  |  %d trades", dpl, InpDailyTargetPct, DayLossPct(), trades),
          dpl >= 0 ? cBuy : cSell, 8, true);
    y += 22;
 
@@ -1723,6 +1726,13 @@ void ShowPanel()
    PButton("btn_lotm", lx, y, sw, 22, "-", cLine, cTxt);
    PText("lotV", lx + sw + 4, y + 4, StringFormat("Lot %.1fx (%.2f)", rtLotMult, LayerLot(E[1], 0)), cTxt, 8, true);
    PButton("btn_lotp", W - 8 - sw, y, sw, 22, "+", cLine, cTxt);
+   y += 26;
+   PButton("btn_slm", 8, y, sw, 22, "-", cLine, cTxt);
+   PText("slV", 8 + sw + 4, y + 4, StringFormat("Hard SL %.0f%%", E[1].stopPct), E[1].stopPct > 30 ? cWarn : cTxt, 8, true);
+   PButton("btn_slp", 8 + sw + 92, y, sw, 22, "+", cLine, cTxt);
+   PButton("btn_dlm", lx, y, sw, 22, "-", cLine, cTxt);
+   PText("dlV", lx + sw + 4, y + 4, StringFormat("Day loss %.0f%%", DayLossPct()), DayLossPct() > 30 ? cWarn : cTxt, 8, true);
+   PButton("btn_dlp", W - 8 - sw, y, sw, 22, "+", cLine, cTxt);
    y += 26;
    PButton("btn_close", 8, y, W - 16, 24, "CLOSE ALL EA TRADES", cSell, clrWhite);
    y += 30;
@@ -1773,6 +1783,8 @@ void SaveControls()
    GlobalVariableSet(gvCtl + "side", rtSide);
    GlobalVariableSet(gvCtl + "lot", rtLotMult);
    GlobalVariableSet(gvCtl + "step", E[1].step);
+   GlobalVariableSet(gvCtl + "sl", E[1].stopPct);
+   GlobalVariableSet(gvCtl + "dayloss", DayLossPct());
    for(int k = 0; k < NE; k++) GlobalVariableSet(gvCtl + "on" + IntegerToString(k), E[k].on ? 1 : 0);
   }
 
@@ -1785,6 +1797,12 @@ void LoadControls()
    rtLotMult = MathMax(0.5, GlobalVariableGet(gvCtl + "lot"));
    double st = GlobalVariableGet(gvCtl + "step");
    if(st >= 1) for(int k = 0; k < NE; k++) E[k].step = st;
+   if(GlobalVariableCheck(gvCtl + "sl"))
+     {
+      double sl = GlobalVariableGet(gvCtl + "sl");
+      if(sl >= 5) for(int k = 0; k < NE; k++) E[k].stopPct = sl;
+     }
+   if(GlobalVariableCheck(gvCtl + "dayloss")) rtDayLoss = GlobalVariableGet(gvCtl + "dayloss");
    for(int k = 0; k < NE; k++)
       if(GlobalVariableCheck(gvCtl + "on" + IntegerToString(k)))
          E[k].on = GlobalVariableGet(gvCtl + "on" + IntegerToString(k)) > 0.5;
@@ -1814,6 +1832,17 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
      {
       rtLotMult = MathMax(0.5, MathMin(10.0, rtLotMult + (b == "lotp" ? 0.5 : -0.5)));
       PrintFormat("Lot multiplier ab %.1fx", rtLotMult);
+     }
+   else if(b == "slm" || b == "slp")
+     {
+      double v = MathMax(5.0, MathMin(95.0, E[1].stopPct + (b == "slp" ? 5.0 : -5.0)));
+      for(int k = 0; k < NE; k++) E[k].stopPct = v;
+      PrintFormat("Hard stop ab %.0f%% equity (sab engines)", v);
+     }
+   else if(b == "dlm" || b == "dlp")
+     {
+      rtDayLoss = MathMax(5.0, MathMin(95.0, DayLossPct() + (b == "dlp" ? 5.0 : -5.0)));
+      PrintFormat("Daily loss limit ab %.0f%%", rtDayLoss);
      }
    else if(b == "close")
      {
