@@ -105,5 +105,5 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
   BUY/SELL/WAIT signal card + score /100 + tier, trade plan (Entry, TP1 = 50% book, TP2 = trailing, DCA levels, hard stop),
   7-part score breakdown bars, session + agla session (IST), news status, teeno engine cards, aaj ka P/L
 - **Alerts:** naya HIGH signal par MT5 popup + phone push (MT5 app me MetaQuotes ID set karein)
-- **DCA:** Scalp, Intraday, Tick-M1 – teeno me har $11 against par naya layer (step growth 1.0)
+- **DCA:** Scalp, Intraday, Tick-M1 – teeno me har $11 against par naya layer (step growth 1.0), layers unlimited (0); rok sirf hard stop / cutloss / trend-flip / margin / `InpMaxTotalLots`
 - **50% booking:** basket TP level aate hi 50% volume close, baaki trailing SL par (`InpBookPct`)

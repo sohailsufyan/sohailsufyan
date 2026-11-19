@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.40"
+#property version   "2.50"
 
 #include <Trade/Trade.mqh>
 
@@ -47,7 +47,7 @@ input ENUM_STEP_MODE  InpScStepMode       = STEP_FIXED_PRICE; // Scalp step mode
 input double          InpScStep           = 11.0;              // Scalp DCA step ($)
 input double          InpScStepATR        = 1.0;              // Scalp step ATR x (ATR mode)
 input double          InpScStepGrowth     = 1.0;              // Scalp step growth (1.0 = har layer $11)
-input int             InpScMaxLayers      = 4;                // Scalp max layers
+input int             InpScMaxLayers      = 0;                // Scalp max layers (0 = unlimited)
 input ENUM_TP_MODE    InpScTPMode         = TP_ATR;           // Scalp TP mode
 input double          InpScTP             = 1.0;              // Scalp fixed TP ($ from average)
 input double          InpScTP_ATR         = 0.6;              // Scalp TP ATR x
@@ -68,7 +68,7 @@ input ENUM_STEP_MODE  InpInStepMode       = STEP_FIXED_PRICE; // Intraday step m
 input double          InpInStep           = 11.0;              // Intraday DCA step ($)
 input double          InpInStepATR        = 1.0;              // Intraday step ATR x (ATR mode)
 input double          InpInStepGrowth     = 1.0;              // Intraday step growth (1.0 = har layer $11)
-input int             InpInMaxLayers      = 6;                // Intraday max layers
+input int             InpInMaxLayers      = 0;                // Intraday max layers (0 = unlimited)
 input ENUM_TP_MODE    InpInTPMode         = TP_ATR;           // Intraday TP mode
 input double          InpInTP             = 2.0;              // Intraday fixed TP ($ from average)
 input double          InpInTP_ATR         = 0.5;              // Intraday TP ATR x
@@ -95,7 +95,7 @@ input ENUM_STEP_MODE  InpTkStepMode       = STEP_FIXED_PRICE; // Tick step mode
 input double          InpTkStep           = 11.0;              // Tick DCA step ($)
 input double          InpTkStepATR        = 1.5;              // Tick step ATR x (ATR mode)
 input double          InpTkStepGrowth     = 1.0;              // Tick step growth (1.0 = har layer $11)
-input int             InpTkMaxLayers      = 3;                // Tick max layers
+input int             InpTkMaxLayers      = 0;                // Tick max layers (0 = unlimited)
 input ENUM_TP_MODE    InpTkTPMode         = TP_ATR;           // Tick TP mode
 input double          InpTkTP             = 0.5;              // Tick fixed TP ($ from average)
 input double          InpTkTP_ATR         = 0.8;              // Tick TP M1 ATR x
@@ -110,6 +110,7 @@ input group "=== DCA / Exit (shared) ==="
 input int             InpMinSecBetween    = 60;           // Layers ke beech min seconds
 input bool            InpAddOnlyInTrend   = true;         // Trend palat jaye to naya layer mat jodo
 input bool            InpBrokerSLTP       = true;         // Auto SL/TP broker par bhi lagao
+input double          InpMaxTotalLots     = 0.0;          // Ek basket ka max total lot (0 = no limit)
 input bool            InpNewCandleLayer   = true;         // Ek candle me max 1 layer (naya candle aane par hi agla layer)
 
 input group "=== Basket Trailing ==="
@@ -553,7 +554,14 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
    //--- 4) DCA layer
    if(!e.on || dayStopped || e.trailActive) return;
    if(TimeCurrent() < cutlossUntil) return;
-   if(layers >= e.maxLayers) return;
+   if(e.maxLayers > 0 && layers >= e.maxLayers) return;
+   if(InpMaxTotalLots > 0)
+     {
+      double cur = 0;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+         if(PositionGetTicket(i) != 0 && IsMine(e)) cur += PositionGetDouble(POSITION_VOLUME);
+      if(cur + LayerLot(e, layers) > InpMaxTotalLots + 1e-9) return;
+     }
    if(InpNewCandleLayer && iTime(_Symbol, e.sigTF, 0) == e.lastLayerBar) return;
    if(InpUseNews && InpNewsNoDCA && newsActive) return;
    if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) return;
@@ -1402,9 +1410,9 @@ string EngineLine(Engine &e)
    int d, layers; double avg, lots, lp, pr;
    GetBasket(e, d, layers, avg, lots, lp, pr);
    int tr = TrendDir(e.hTF, e.hTS, e.trendTF);
-   return StringFormat("%-8s: trend %s | %s %d/%d lots %.2f avg %.2f P/L %.2f | TP %.2f SL %.2f%s | today %d baskets%s",
+   return StringFormat("%-8s: trend %s | %s %d/%s lots %.2f avg %.2f P/L %.2f | TP %.2f SL %.2f%s | today %d baskets%s",
                        e.name, tr == 1 ? "UP" : (tr == -1 ? "DOWN" : "SIDE"),
-                       d == 1 ? "BUY" : (d == -1 ? "SELL" : "-"), layers, e.maxLayers, lots, avg, pr,
+                       d == 1 ? "BUY" : (d == -1 ? "SELL" : "-"), layers, MaxStr(e.maxLayers), lots, avg, pr,
                        e.syncedTP, e.syncedSL, e.trailActive ? " TRAILING" : "", e.basketsToday,
                        e.manual ? " | manual ON" : "");
   }
@@ -1425,7 +1433,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.40 | %s\n"
+      "GoldDCA_EA v2.50 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1518,6 +1526,9 @@ string ISTTime(int gmtHour)
    return StringFormat("%02d:%02d IST", mins / 60, mins % 60);
   }
 
+string MaxStr(int m) { return m > 0 ? IntegerToString(m) : "unlimited"; }
+int DcaShow() { return InpInMaxLayers > 0 ? (int)MathMin(4, InpInMaxLayers - 1) : 4; }
+
 string EngineState(Engine &e, int layers)
   {
    if(!e.on && layers == 0) return "OFF";
@@ -1529,7 +1540,7 @@ string EngineState(Engine &e, int layers)
       return "SCANNING";
      }
    if(e.trailActive) return e.booked ? "BOOKED + TRAIL" : "TRAILING";
-   if(layers >= e.maxLayers) return "MAX LAYERS";
+   if(e.maxLayers > 0 && layers >= e.maxLayers) return "MAX LAYERS";
    return "DCA ACTIVE";
   }
 
@@ -1563,7 +1574,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.40  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v2.50  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1611,8 +1622,8 @@ void ShowPanel()
    PText("pT1v", 105, ty + 12, DoubleToString(tp1, _Digits), cBuy, 9, true);
    PText("pT2", 225, ty, "TP2 (trailing)", cDim, 7); PText("pT2v", 225, ty + 12, DoubleToString(tp2, _Digits), cBuy, 9, true);
    string dca = "DCA every $" + DoubleToString(InpInStep, 0) + ": ";
-   for(int i = 1; i <= MathMin(4, InpInMaxLayers - 1); i++)
-      dca += DoubleToString(px - sd * InpInStep * i, 1) + (i < MathMin(4, InpInMaxLayers - 1) ? " | " : "");
+   for(int i = 1; i <= DcaShow(); i++)
+      dca += DoubleToString(px - sd * InpInStep * i, 1) + (i < DcaShow() ? " | " : "");
    PText("pDca", 18, ty + 32, dca, cWarn, 8);
    PText("pSL", 18, ty + 48, StringFormat("Hard stop: basket loss %.0f%% equity%s", InpInStopPct,
                                            InpCutlossUSD > 0 ? StringFormat(" / $%.0f cutloss", InpCutlossUSD) : ""), cSell, 8);
@@ -1657,8 +1668,8 @@ void ShowPanel()
       color stc = (st == "SCANNING" || st == "DCA ACTIVE") ? cAcc : (StringFind(st, "TRAIL") >= 0 ? cBuy : (st == "OFF" ? cDim : cWarn));
       PText("engS" + ks, W - 16, y + 3, st, stc, 8, true, ANCHOR_RIGHT_UPPER);
       string info = layers > 0 ?
-                    StringFormat("%s  %d/%d layers  %.2f lot  avg %.2f  P/L %+.2f", d == 1 ? "BUY" : "SELL", layers, E[k].maxLayers, lots, avg, pr) :
-                    StringFormat("DCA $%.0f | max %d layers | %d baskets today", E[k].step, E[k].maxLayers, E[k].basketsToday);
+                    StringFormat("%s  %d/%s layers  %.2f lot  avg %.2f  P/L %+.2f", d == 1 ? "BUY" : "SELL", layers, MaxStr(E[k].maxLayers), lots, avg, pr) :
+                    StringFormat("DCA $%.0f | max %s layers | %d baskets today", E[k].step, MaxStr(E[k].maxLayers), E[k].basketsToday);
       PText("engI" + ks, 16, y + 18, info, layers > 0 ? (pr >= 0 ? cBuy : cSell) : cDim, 8);
       y += 38;
      }
