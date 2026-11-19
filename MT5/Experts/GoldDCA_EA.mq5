@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.82"
+#property version   "3.90"
 
 #include <Trade/Trade.mqh>
 
@@ -128,6 +128,17 @@ input double          InpFxBookPct        = 0.0;          // Trigger ($3) par it
 input bool            InpFxBackup         = true;         // Backup: +$2 tak aakar palte to chhote profit me nikal jao
 input double          InpFxBackupArm      = 2.0;          // Backup tab active jab price average se +$2 tak pahunche
 input double          InpFxBackupExit     = 0.5;          // Phir wapas +$0.50 par aaye to poora basket close
+
+input group "=== SCALPING Special (Scalp M5 + Tick M1) - Intraday par asar nahi ==="
+input bool            InpSxOn             = true;         // Scalping ke liye alag (chhota aur tez) exit
+input double          InpSxTrigger        = 1.5;          // Scalp: average se +$1.5 par lock + trailing
+input double          InpSxLock           = 0.5;          // Scalp: lock +$0.5
+input double          InpSxTrailDist      = 0.8;          // Scalp: trailing $0.8 peeche
+input double          InpSxTP             = 2.5;          // Scalp: +$2.5 par poora basket close
+input double          InpSxBackupArm      = 1.0;          // Scalp backup: +$1 tak aaye...
+input double          InpSxBackupExit     = 0.3;          // ...aur wapas +$0.3 par aaye to close
+input bool            InpSxSessionOnly    = true;         // Scalp entry sirf London + New York (sabse zyada liquidity)
+input int             InpSxMaxMinutes     = 0;            // Basket itne minute purana ho to +$0.2 par bahar (0 = off)
 
 input group "=== Basket Trailing (ATR mode, jab Fixed $ exit OFF) ==="
 input bool            InpBasketTrail      = true;         // TP par close ki jagah trailing shuru karo
@@ -631,35 +642,56 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
 
    if(InpBrokerSLTP) SyncSLTP(e, dir, layers, avg);
 
-   //--- 1a) Fixed $ exit: +$3 par +$1 lock, phir $2 trailing, +$5 par close
+   //--- 1a) Fixed $ exit: Intraday +$3/+$1/$2/+$5, Scalping +$1.5/+$0.5/$0.8/+$2.5
    if(InpFxExit)
      {
+      bool sx = IsScalpEng(e);
+      double xTrig = sx ? InpSxTrigger : InpFxTrigger, xLock = sx ? InpSxLock : InpFxLock;
+      double xTrail = sx ? InpSxTrailDist : InpFxTrailDist, xTP = sx ? InpSxTP : InpFxTP;
+      double xArm = sx ? InpSxBackupArm : InpFxBackupArm, xBk = sx ? InpSxBackupExit : InpFxBackupExit;
       double cur  = (dir == 1) ? bid : ask;
       double move = (dir == 1) ? bid - avg : avg - ask;
       if(move > e.maxMove) e.maxMove = move;
+      // Scalp time exit: basket purana ho gaya to chhote profit me bahar
+      if(sx && InpSxMaxMinutes > 0 && move >= 0.2 && profit > 0)
+        {
+         datetime t0 = 0;
+         for(int q = PositionsTotal() - 1; q >= 0; q--)
+            if(PositionGetTicket(q) != 0 && IsMine(e))
+              {
+               datetime pt = (datetime)PositionGetInteger(POSITION_TIME);
+               if(t0 == 0 || pt < t0) t0 = pt;
+              }
+         if(t0 > 0 && TimeCurrent() - t0 >= InpSxMaxMinutes * 60)
+           {
+            PrintFormat("[%s] Scalp time exit: %d min purana, profit %.2f", e.name, InpSxMaxMinutes, profit);
+            CloseBasket(e);
+            return;
+           }
+        }
       // Backup: +$2 tak aaya, +$3 nahi chhua, wapas +$0.50 par aaya -> chhote profit me close
-      if(InpFxBackup && !e.trailActive && e.maxMove >= InpFxBackupArm && move <= InpFxBackupExit && profit > 0)
+      if(InpFxBackup && !e.trailActive && e.maxMove >= xArm && move <= xBk && profit > 0)
         {
          PrintFormat("[%s] Backup exit: max +$%.2f ke baad +$%.2f par close, profit %.2f", e.name, e.maxMove, move, profit);
          CloseBasket(e);
          return;
         }
-      if(move >= InpFxTP && profit > 0)
+      if(move >= xTP && profit > 0)
         {
-         PrintFormat("[%s] TP +$%.1f hit: %d layers, profit %.2f", e.name, InpFxTP, layers, profit);
+         PrintFormat("[%s] TP +$%.1f hit: %d layers, profit %.2f", e.name, xTP, layers, profit);
          CloseBasket(e);
          return;
         }
-      if(!e.trailActive && move >= InpFxTrigger)
+      if(!e.trailActive && move >= xTrig)
         {
          e.trailActive = true;
-         e.trailSL = (dir == 1) ? avg + InpFxLock : avg - InpFxLock;
-         PrintFormat("[%s] +$%.1f aaya: SL +$%.1f par lock (%.2f), trailing shuru", e.name, InpFxTrigger, InpFxLock, e.trailSL);
+         e.trailSL = (dir == 1) ? avg + xLock : avg - xLock;
+         PrintFormat("[%s] +$%.1f aaya: SL +$%.1f par lock (%.2f), trailing shuru", e.name, xTrig, xLock, e.trailSL);
          if(InpFxBookPct > 0) BookPartial(e, InpFxBookPct);
         }
       if(e.trailActive)
         {
-         double cand = (dir == 1) ? cur - InpFxTrailDist : cur + InpFxTrailDist;
+         double cand = (dir == 1) ? cur - xTrail : cur + xTrail;
          if(dir == 1 && cand > e.trailSL + 0.1) e.trailSL = cand;
          if(dir == -1 && cand < e.trailSL - 0.1) e.trailSL = cand;
          bool hit = (dir == 1) ? (bid <= e.trailSL) : (ask >= e.trailSL);
@@ -1223,6 +1255,7 @@ void TryNewBasket(Engine &e, int k)
      }
    if(sig == 0) return;
    if(e.side != 0 && sig != e.side) return;
+   if(IsScalpEng(e) && InpSxSessionOnly && !LondonOrNY()) return;
    if(!InstOK(sig)) return;
    if(sig == 1 && (!InpAllowBuy || rtSide == -1)) return;
    if(sig == -1 && (!InpAllowSell || rtSide == 1)) return;
@@ -1330,7 +1363,7 @@ double SigATR(Engine &e)
 
 double TPDist(Engine &e)
   {
-   if(InpFxExit) return InpFxTP;
+   if(InpFxExit) return IsScalpEng(e) ? InpSxTP : InpFxTP;
    if(e.tpMode == TP_ATR)
      {
       double a = SigATR(e);
@@ -1674,7 +1707,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.82 | %s\n"
+      "GoldDCA_EA v3.90 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1825,7 +1858,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.82  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.90  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -2441,4 +2474,17 @@ void CheckRecoveryHedge()
                          E[h].name, d == 1 ? "SELL" : "BUY", lot, E[k].name, layers, pr));
         }
      }
+  }
+
+//==================== SCALPING HELPERS ====================
+bool IsScalpEng(Engine &e)
+  {
+   return InpSxOn && (e.tag == "SC" || e.tag == "TK");
+  }
+
+bool LondonOrNY()
+  {
+   MqlDateTime g;
+   TimeToStruct(TimeCurrent() - InpServerGMTOffset * 3600, g);
+   return g.hour >= 7 && g.hour < 21;     // London 07-16 GMT, New York 12-21 GMT
   }

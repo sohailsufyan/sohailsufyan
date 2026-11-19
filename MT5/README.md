@@ -170,3 +170,9 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - v3.81: panel engine row me **agla DCA price** aur **DCA kyun nahi juda** ka kaaran (waiting $11, reversal pause, spread, next candle, margin/lot limit, Friday late, trailing ...)
 - v3.82: fix – SL/TP price ke paas ho to SL kabhi 0 nahi hota (purana SL rehta hai), broker freeze level ka dhyan, already-closed position par close error nahi
 - DCA step default ab $3 (demo testing)
+
+## v3.90 – Scalping special (Scalp M5 + Tick M1), Intraday same
+- Scalp exit: +$1.5 par +$0.5 lock, $0.8 trailing, +$2.5 par close; backup +$1 → +$0.3
+- Scalp entry sirf London + New York session (`InpSxSessionOnly`)
+- Optional time exit: basket `InpSxMaxMinutes` se purana to +$0.2 par bahar (default off)
+- Intraday ke exit pehle jaise: +$3 / +$1 / $2 / +$5
