@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.50"
+#property version   "3.60"
 
 #include <Trade/Trade.mqh>
 
@@ -151,6 +151,25 @@ input bool            InpPauseOnCHoCH     = true;         // Structure ulta CHoC
 input bool            InpNetClose         = true;         // Saare baskets ka total P/L profit me aaye to sab close
 input double          InpNetCloseUSD      = 5.0;          // Kam se kam itna $ net profit
 input double          InpNetClosePerLot   = 50.0;         // Ya har 1.00 lot par itna $ (jo bada ho)
+
+input group "=== Weekend Protection (Friday) ==="
+input bool            InpFriClose         = true;         // Friday shaam basket profit me / average ke paas ho to close
+input int             InpFriHour          = 20;           // Friday kis server hour se
+input double          InpFriMaxLossUSD    = 0.0;          // Basket ka loss itne $ tak ho to bhi close (0 = sirf profit me)
+input bool            InpFriNoDCA         = true;         // Friday is hour ke baad naye DCA layers bhi nahi
+input bool            InpFriForceClose    = false;        // Friday force close: sab baskets band, chahe loss ho
+input int             InpFriForceHour     = 22;           // Force close ka server hour
+
+input group "=== Margin / Lot Limit (sab baskets mila kar) ==="
+input double          InpMaxAllLots       = 0.0;          // Saare EA baskets ka kul lot isse zyada nahi (0 = off)
+input double          InpMinMarginLevel   = 300.0;        // Margin level % isse kam ho to naya basket / layer nahi (0 = off)
+
+input group "=== Telegram Alerts ==="
+input bool            InpTgOn             = false;        // Telegram alerts ON
+input string          InpTgToken          = "";           // Bot token (BotFather se)
+input string          InpTgChatId         = "";           // Chat ID
+input bool            InpTgLayers         = true;         // Har DCA layer ka message bhi
+input bool            InpTgDaily          = true;         // Din khatam hone par daily report
 
 input group "=== Cutloss ($) ==="
 input double          InpCutlossUSD       = 0.0;          // Dono engine ka floating loss itna $ ho to sab close (0 = off)
@@ -453,6 +472,12 @@ void OnTick()
    UpdateNews();
    CheckCutloss();
    CheckNetClose();
+   if(InpFriForceClose && FridayLate(InpFriForceHour) && TotalLayers() > 0)
+     {
+      Print("Friday FORCE close - sab baskets band");
+      Tg("Friday FORCE close - sab baskets band");
+      CloseAllEngines();
+     }
    RecordTick();
 
    for(int k = 0; k < NE; k++)
@@ -474,6 +499,13 @@ void OnTick()
 //==================== DAY TRACKING ====================
 void ResetDay()
   {
+   if(InpTgDaily && dayStartEq > 0)
+     {
+      double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+      Tg(StringFormat("DAILY REPORT %s | P/L %+.2f (%+.2f%%) | trades %d | Balance %.2f | Equity %.2f",
+                      _Symbol, eq - dayStartEq, (eq - dayStartEq) / dayStartEq * 100.0, TradesToday(),
+                      AccountInfoDouble(ACCOUNT_BALANCE), eq));
+     }
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
    dayKey = dt.year * 1000 + dt.day_of_year;
    dayStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -492,6 +524,7 @@ void CheckNewDay()
       (dayStartEq - eq) / dayStartEq * 100.0 >= DayLossPct())
      {
       PrintFormat("Daily loss %.1f%% hit - sab close, aaj trading band.", DayLossPct());
+      Tg(StringFormat("DAILY LOSS LIMIT %.0f%% hit - sab close, aaj trading band", DayLossPct()));
       CloseAllEngines();
       dayStopped = true;
      }
@@ -697,9 +730,20 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
       return;
      }
 
+   //--- 3b) Weekend protection
+   if(InpFriClose && FridayLate(InpFriHour) && (profit >= 0 || (InpFriMaxLossUSD > 0 && profit >= -InpFriMaxLossUSD)))
+     {
+      PrintFormat("[%s] Friday close: %d layers, P/L %.2f (weekend gap se bachao)", e.name, layers, profit);
+      Tg(StringFormat("Friday close [%s] %d layers, P/L %+.2f", e.name, layers, profit));
+      CloseBasket(e);
+      return;
+     }
+
    //--- 4) DCA layer
    if(!e.on || dayStopped || e.trailActive || rtPaused) return;
    if(TimeCurrent() < cutlossUntil) return;
+   if(InpFriNoDCA && FridayLate(InpFriHour)) return;
+   if(!AccountRoomOK(LayerLot(e, layers))) return;
    if(e.maxLayers > 0 && layers >= e.maxLayers) return;
    if(InpMaxTotalLots > 0)
      {
@@ -737,6 +781,12 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
 
 void CloseBasket(Engine &e)
   {
+   int cd, cl; double ca, clt, clp, cpr;
+   GetBasket(e, cd, cl, ca, clt, clp, cpr);
+   if(cl > 0)
+      Tg(StringFormat("%s CLOSED [%s] %s | %d layers, %.2f lot | P/L %+.2f | Equity %.2f",
+                      cpr >= 0 ? "PROFIT" : "LOSS", e.name, cd == 1 ? "BUY" : "SELL", cl, clt, cpr,
+                      AccountInfoDouble(ACCOUNT_EQUITY)));
    trade.SetExpertMagicNumber(e.magic);
    for(int pass = 0; pass < 3; pass++)
      {
@@ -1114,6 +1164,7 @@ void CheckCutloss()
      }
    if(total > -InpCutlossUSD) return;
    PrintFormat("CUTLOSS: floating %.2f <= -%.2f. Sab close.", total, InpCutlossUSD);
+   Tg(StringFormat("CUTLOSS: floating %.2f - sab close", total));
    CloseAllEngines();
    if(InpResumeAfterCut) cutlossUntil = TimeCurrent() + InpCutCooldownMin * 60;
    else dayStopped = true;
@@ -1185,6 +1236,7 @@ void TryNewBasket(Engine &e, int k)
 
    double lot = LayerLot(e, 0);
    if(!MarginOK(sig, lot)) return;
+   if(!AccountRoomOK(lot)) return;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(Open(e, sig, lot, "L1"))
      {
@@ -1377,6 +1429,9 @@ bool Open(Engine &e, int dir, double lot, string tag)
       e.lastLayerBar = iTime(_Symbol, e.sigTF, 0);
       e.maxMove = 0;      // naya layer = naya average, backup dobara se
       e.tradesToday++;
+      if(tag == "L1" || InpTgLayers)
+         Tg(StringFormat("%s [%s] %s %s | lot %.2f @ %.2f", tag == "L1" ? "NEW BASKET" : "DCA " + tag, e.name,
+                         dir == 1 ? "BUY" : "SELL", _Symbol, lot, trade.ResultPrice()));
       return true;
      }
    PrintFormat("[%s] Order fail: %d %s", e.name, trade.ResultRetcode(), trade.ResultRetcodeDescription());
@@ -1594,7 +1649,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.50 | %s\n"
+      "GoldDCA_EA v3.60 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1745,7 +1800,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.50  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.60  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -2224,6 +2279,73 @@ void CheckNetClose()
    if(net >= need)
      {
       PrintFormat("NET PROFIT CLOSE: %d baskets, net %+.2f >= %.2f - sab positions profit me close", nb, net, need);
+      Tg(StringFormat("NET PROFIT CLOSE: %d baskets, net %+.2f", nb, net));
       CloseAllEngines();
+     }
+  }
+
+//==================== WEEKEND / MARGIN / TELEGRAM ====================
+bool FridayLate(int hour)
+  {
+   MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+   return dt.day_of_week == 5 && dt.hour >= hour;
+  }
+
+double AllEALots()
+  {
+   double l = 0;
+   for(int k = 0; k < NE; k++)
+     {
+      if(!InpHedgeMode && k >= NT) continue;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+         if(PositionGetTicket(i) != 0 && IsMine(E[k])) l += PositionGetDouble(POSITION_VOLUME);
+     }
+   return l;
+  }
+
+// Kul lot limit + margin level check (naya basket / layer se pehle)
+bool AccountRoomOK(double addLot)
+  {
+   if(InpMaxAllLots > 0 && AllEALots() + addLot > InpMaxAllLots + 1e-9) return false;
+   if(InpMinMarginLevel > 0)
+     {
+      double m = AccountInfoDouble(ACCOUNT_MARGIN);
+      if(m > 0 && AccountInfoDouble(ACCOUNT_MARGIN_LEVEL) < InpMinMarginLevel) return false;
+     }
+   return true;
+  }
+
+string UrlEncode(string s)
+  {
+   uchar b[];
+   int n = StringToCharArray(s, b, 0, WHOLE_ARRAY, CP_UTF8);
+   string out = "";
+   for(int i = 0; i < n; i++)
+     {
+      uchar c = b[i];
+      if(c == 0) break;
+      if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~')
+         out += CharToString(c);
+      else
+         out += StringFormat("%%%02X", c);
+     }
+   return out;
+  }
+
+datetime tgWarned = 0;
+void Tg(string msg)
+  {
+   if(!InpTgOn || InpTgToken == "" || InpTgChatId == "" || MQLInfoInteger(MQL_TESTER)) return;
+   string url = "https://api.telegram.org/bot" + InpTgToken + "/sendMessage";
+   string body = "chat_id=" + UrlEncode(InpTgChatId) + "&text=" + UrlEncode("GoldDCA: " + msg);
+   char data[], res[];
+   StringToCharArray(body, data, 0, StringLen(body));
+   string rh;
+   int code = WebRequest("POST", url, "Content-Type: application/x-www-form-urlencoded\r\n", 3000, data, res, rh);
+   if(code != 200 && TimeCurrent() - tgWarned > 3600)
+     {
+      tgWarned = TimeCurrent();
+      PrintFormat("Telegram fail (code %d, err %d). MT5: Tools > Options > Expert Advisors > 'Allow WebRequest' me https://api.telegram.org add karein.",
+                  code, GetLastError());
      }
   }
