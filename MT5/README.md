@@ -112,3 +112,12 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Lot: 0.01 per $2,000 balance (fixed-add 0.5) | DCA $11, unlimited layers
 - Hard stop: Scalp 10%, Intraday 15%, Tick 8% equity
 - **Breakeven exit:** 3+ layers ke baad price average + $0.50 par aaye to poora basket close
+
+## v2.70 – Chart control buttons (panel ke neeche)
+- **SCALP / INTRADAY / TICK-M1 ON-OFF:** engine band karne par naye trade nahi, chalu basket ka TP/SL/trailing chalta rahega
+- **Direction:** BUY + SELL → BUY ONLY → SELL ONLY (click se badlta hai)
+- **PAUSE / RESUME:** naye basket aur DCA band, exits chalte rahenge
+- **DCA − / +:** sab engines ka DCA gap $1 kam/zyada
+- **Lot − / +:** lot 0.5x se 10x (0.5 ke step me)
+- **CLOSE ALL EA TRADES:** confirm ke baad saare EA baskets close
+- Button settings restart ke baad bhi yaad rehti hain

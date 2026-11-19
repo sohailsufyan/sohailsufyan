@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.60"
+#property version   "2.70"
 
 #include <Trade/Trade.mqh>
 
@@ -266,6 +266,12 @@ datetime lastLevelsBar = 0, lastLevelsTry = 0;
 #define  SRPFX "GDCA_SR_"
 #define  PFX   "GDCA_P_"
 
+//--- Chart button controls (runtime, inputs ke upar override)
+bool     rtPaused = false;
+int      rtSide = 0;          // 0 = BUY+SELL, 1 = BUY only, -1 = SELL only
+double   rtLotMult = 1.0;     // lot multiplier
+string   gvCtl = "";
+
 bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES sig, ENUM_TIMEFRAMES tr,
                  double lotF, double lotM, int stepMode, double step, double stepATR, double growth, int layers,
                  int tpMode, double tp, double tpATR, double tpMin, double stopPct, int cool, int maxB,
@@ -282,7 +288,6 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
    e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
-   if(!on) return true;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hSF   = iMA(_Symbol, sig, InpSigFastEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -296,7 +301,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
 
 void ReleaseEngine(Engine &e)
   {
-   if(!e.on) return;
+   if(e.hTF == INVALID_HANDLE) return;
    IndicatorRelease(e.hTF); IndicatorRelease(e.hTS); IndicatorRelease(e.hSF); IndicatorRelease(e.hSS);
    IndicatorRelease(e.hRSI); IndicatorRelease(e.hATR); IndicatorRelease(e.hMACD);
   }
@@ -340,6 +345,7 @@ int OnInit()
 
    if(!InitScanner()) { Print("Scanner indicator error: ", GetLastError()); return(INIT_FAILED); }
 
+   LoadControls();
    ResetDay();
    UpdateLevels(true);
    EventSetTimer(1);
@@ -567,7 +573,7 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
      }
 
    //--- 4) DCA layer
-   if(!e.on || dayStopped || e.trailActive) return;
+   if(!e.on || dayStopped || e.trailActive || rtPaused) return;
    if(TimeCurrent() < cutlossUntil) return;
    if(e.maxLayers > 0 && layers >= e.maxLayers) return;
    if(InpMaxTotalLots > 0)
@@ -981,7 +987,7 @@ void CheckCutloss()
 void TryNewBasket(Engine &e, int k)
   {
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
-   if(dayStopped) return;
+   if(dayStopped || rtPaused) return;
    if(TimeCurrent() < cutlossUntil) return;
    if(InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct) return;
    if(e.basketsToday >= e.maxBaskets) return;
@@ -1007,8 +1013,8 @@ void TryNewBasket(Engine &e, int k)
       sig = Signal(e);
      }
    if(sig == 0) return;
-   if(sig == 1 && !InpAllowBuy) return;
-   if(sig == -1 && !InpAllowSell) return;
+   if(sig == 1 && (!InpAllowBuy || rtSide == -1)) return;
+   if(sig == -1 && (!InpAllowSell || rtSide == 1)) return;
 
    // Doosre engine ka basket ulti direction me ho to skip
    if(InpNoOpposite)
@@ -1207,7 +1213,7 @@ double LayerLot(Engine &e, int layerIndex)
    if(InpLotMode == LOT_AUTO && InpBalancePerLot > 0)
       base = 0.01 * MathFloor(AccountInfoDouble(ACCOUNT_BALANCE) / InpBalancePerLot);
    if(base <= 0) base = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double first = base * e.lotFactor * e.lotScale;
+   double first = base * e.lotFactor * e.lotScale * rtLotMult;
    if(InpLotProgression == PROG_FIXED_ADD)
       return NormLot(first + first * InpLotAddFactor * layerIndex);
    return NormLot(first * MathPow(e.lotMult, layerIndex));
@@ -1448,7 +1454,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.60 | %s\n"
+      "GoldDCA_EA v2.70 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1589,7 +1595,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.60  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v2.70  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1636,9 +1642,9 @@ void ShowPanel()
    PText("pT1", 105, ty, "TP1 (" + DoubleToString(InpBookPct, 0) + "% book)", cDim, 7);
    PText("pT1v", 105, ty + 12, DoubleToString(tp1, _Digits), cBuy, 9, true);
    PText("pT2", 225, ty, "TP2 (trailing)", cDim, 7); PText("pT2v", 225, ty + 12, DoubleToString(tp2, _Digits), cBuy, 9, true);
-   string dca = "DCA every $" + DoubleToString(InpInStep, 0) + ": ";
+   string dca = "DCA every $" + DoubleToString(E[1].step, 0) + ": ";
    for(int i = 1; i <= DcaShow(); i++)
-      dca += DoubleToString(px - sd * InpInStep * i, 1) + (i < DcaShow() ? " | " : "");
+      dca += DoubleToString(px - sd * E[1].step * i, 1) + (i < DcaShow() ? " | " : "");
    PText("pDca", 18, ty + 32, dca, cWarn, 8);
    PText("pSL", 18, ty + 48, StringFormat("Hard stop: basket loss %.0f%% equity%s", InpInStopPct,
                                            InpCutlossUSD > 0 ? StringFormat(" / $%.0f cutloss", InpCutlossUSD) : ""), cSell, 8);
@@ -1696,13 +1702,37 @@ void ShowPanel()
    PText("today", 10, y + 2, StringFormat("Today: %+.2f%%  (target %.0f%% | max loss %.0f%%)  |  %d trades", dpl, InpDailyTargetPct, InpDailyLossPct, trades),
          dpl >= 0 ? cBuy : cSell, 8, true);
    y += 22;
+
+   // ---- control buttons
+   PText("ctlT", 10, y, "CONTROLS", cDim, 7, true);
+   y += 14;
+   int bw = (W - 16 - 8) / 3;
+   for(int k = 0; k < NE; k++)
+      PButton("btn_eng" + IntegerToString(k), 8 + k * (bw + 4), y, bw, 22,
+              E[k].name + (E[k].on ? "  ON" : "  OFF"), E[k].on ? cBuy : cLine, E[k].on ? cBg : cTxt);
+   y += 26;
+   string sideTxt = rtSide == 0 ? "BUY + SELL" : (rtSide == 1 ? "BUY ONLY" : "SELL ONLY");
+   PButton("btn_side", 8, y, bw * 2 + 4, 22, "Direction: " + sideTxt, rtSide == 0 ? cAcc : (rtSide == 1 ? cBuy : cSell), cBg);
+   PButton("btn_pause", 8 + 2 * (bw + 4), y, bw, 22, rtPaused ? "RESUME" : "PAUSE", rtPaused ? cWarn : cLine, rtPaused ? cBg : cTxt);
+   y += 26;
+   int sw = 26;
+   PButton("btn_dcam", 8, y, sw, 22, "-", cLine, cTxt);
+   PText("dcaV", 8 + sw + 4, y + 4, "DCA $" + DoubleToString(E[1].step, 0), cTxt, 8, true);
+   PButton("btn_dcap", 8 + sw + 70, y, sw, 22, "+", cLine, cTxt);
+   int lx = W / 2 + 4;
+   PButton("btn_lotm", lx, y, sw, 22, "-", cLine, cTxt);
+   PText("lotV", lx + sw + 4, y + 4, StringFormat("Lot %.1fx (%.2f)", rtLotMult, LayerLot(E[1], 0)), cTxt, 8, true);
+   PButton("btn_lotp", W - 8 - sw, y, sw, 22, "+", cLine, cTxt);
+   y += 26;
+   PButton("btn_close", 8, y, W - 16, 24, "CLOSE ALL EA TRADES", cSell, clrWhite);
+   y += 30;
    ObjectSetInteger(0, PFX + "bg", OBJPROP_YSIZE, y);
 
    // ---- alerts on fresh HIGH signal
    if(isHigh && (!prevHigh || sd != lastAlertDir) && TimeCurrent() - lastAlertTime >= InpAlertGapMin * 60)
      {
       string msg = StringFormat("%s %s %s %d/100 | Entry %s TP1 %s TP2 %s | DCA $%.0f", _Symbol, sd == 1 ? "BUY" : "SELL", Tier(score), score,
-                                DoubleToString(px, _Digits), DoubleToString(tp1, _Digits), DoubleToString(tp2, _Digits), InpInStep);
+                                DoubleToString(px, _Digits), DoubleToString(tp1, _Digits), DoubleToString(tp2, _Digits), E[1].step);
       if(InpAlertPopup) Alert(msg);
       if(InpAlertPush) SendNotification(msg);
       lastAlertTime = TimeCurrent(); lastAlertDir = sd;
@@ -1711,3 +1741,86 @@ void ShowPanel()
    ChartRedraw();
   }
 //+------------------------------------------------------------------+
+
+//==================== CHART BUTTONS ====================
+void PButton(string id, int x, int y, int w, int h, string txt, color bg, color fg)
+  {
+   string n = PFX + id;
+   if(ObjectFind(0, n) < 0)
+     {
+      ObjectCreate(0, n, OBJ_BUTTON, 0, 0, 0);
+      ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, n, OBJPROP_HIDDEN, true);
+      ObjectSetString(0, n, OBJPROP_FONT, "Segoe UI Semibold");
+      ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 8);
+     }
+   ObjectSetInteger(0, n, OBJPROP_XDISTANCE, InpPanelX + x);
+   ObjectSetInteger(0, n, OBJPROP_YDISTANCE, InpPanelY + y);
+   ObjectSetInteger(0, n, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, n, OBJPROP_YSIZE, h);
+   ObjectSetString(0, n, OBJPROP_TEXT, txt);
+   ObjectSetInteger(0, n, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, n, OBJPROP_COLOR, fg);
+   ObjectSetInteger(0, n, OBJPROP_BORDER_COLOR, cLine);
+   ObjectSetInteger(0, n, OBJPROP_STATE, false);
+  }
+
+// Settings restart ke baad bhi yaad rahein (terminal global variables)
+void SaveControls()
+  {
+   GlobalVariableSet(gvCtl + "paused", rtPaused ? 1 : 0);
+   GlobalVariableSet(gvCtl + "side", rtSide);
+   GlobalVariableSet(gvCtl + "lot", rtLotMult);
+   GlobalVariableSet(gvCtl + "step", E[1].step);
+   for(int k = 0; k < NE; k++) GlobalVariableSet(gvCtl + "on" + IntegerToString(k), E[k].on ? 1 : 0);
+  }
+
+void LoadControls()
+  {
+   gvCtl = "GDCA_" + _Symbol + "_" + IntegerToString(InpMagic) + "_";
+   if(MQLInfoInteger(MQL_TESTER) || !GlobalVariableCheck(gvCtl + "side")) return;
+   rtPaused  = GlobalVariableGet(gvCtl + "paused") > 0.5;
+   rtSide    = (int)GlobalVariableGet(gvCtl + "side");
+   rtLotMult = MathMax(0.5, GlobalVariableGet(gvCtl + "lot"));
+   double st = GlobalVariableGet(gvCtl + "step");
+   if(st >= 1) for(int k = 0; k < NE; k++) E[k].step = st;
+   for(int k = 0; k < NE; k++)
+      if(GlobalVariableCheck(gvCtl + "on" + IntegerToString(k)))
+         E[k].on = GlobalVariableGet(gvCtl + "on" + IntegerToString(k)) > 0.5;
+   PrintFormat("Saved controls loaded: paused=%s side=%d lot=%.1fx step=$%.0f", rtPaused ? "yes" : "no", rtSide, rtLotMult, E[1].step);
+  }
+
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+  {
+   if(id != CHARTEVENT_OBJECT_CLICK || StringFind(sparam, PFX + "btn_") != 0) return;
+   string b = StringSubstr(sparam, StringLen(PFX + "btn_"));
+   ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+
+   if(StringFind(b, "eng") == 0)
+     {
+      int k = (int)StringToInteger(StringSubstr(b, 3));
+      if(k >= 0 && k < NE) { E[k].on = !E[k].on; PrintFormat("[%s] %s (button)", E[k].name, E[k].on ? "ON" : "OFF"); }
+     }
+   else if(b == "side")  { rtSide = (rtSide == 0) ? 1 : (rtSide == 1 ? -1 : 0); }
+   else if(b == "pause") { rtPaused = !rtPaused; Print(rtPaused ? "EA PAUSED - naye trade/DCA band, exits chalte rahenge" : "EA RESUMED"); }
+   else if(b == "dcam" || b == "dcap")
+     {
+      double st = MathMax(1.0, E[1].step + (b == "dcap" ? 1.0 : -1.0));
+      for(int k = 0; k < NE; k++) E[k].step = st;
+      PrintFormat("DCA step ab $%.0f (sab engines)", st);
+     }
+   else if(b == "lotm" || b == "lotp")
+     {
+      rtLotMult = MathMax(0.5, MathMin(10.0, rtLotMult + (b == "lotp" ? 0.5 : -0.5)));
+      PrintFormat("Lot multiplier ab %.1fx", rtLotMult);
+     }
+   else if(b == "close")
+     {
+      int r = MessageBox("Saare EA trades abhi close karein?", "GoldDCA - Close All", MB_YESNO | MB_ICONWARNING);
+      if(r == IDYES) { CloseAllEngines(); Print("CLOSE ALL (button)"); }
+     }
+   SaveControls();
+   lastPanel = 0;
+   ShowPanel();
+  }
