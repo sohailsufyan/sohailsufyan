@@ -1,0 +1,27 @@
+; GoldDCA_EA v2.60 - recommended settings
+InpLotMode=1
+InpBalancePerLot=2000
+InpLotProgression=1
+InpLotAddFactor=0.5
+InpScStep=11
+InpInStep=11
+InpTkStep=11
+InpScStepGrowth=1.0
+InpInStepGrowth=1.0
+InpTkStepGrowth=1.0
+InpScMaxLayers=0
+InpInMaxLayers=0
+InpTkMaxLayers=0
+InpScStopPct=10
+InpInStopPct=15
+InpTkStopPct=8
+InpBEExit=true
+InpBEMinLayers=3
+InpBEBuffer=0.5
+InpBookPct=50
+InpBasketTrail=true
+InpUseScanner=true
+InpMinScore=75
+InpDailyTargetPct=5
+InpDailyLossPct=15
+InpUseNews=true

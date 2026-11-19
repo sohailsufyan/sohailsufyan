@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.50"
+#property version   "2.60"
 
 #include <Trade/Trade.mqh>
 
@@ -32,7 +32,7 @@ input bool            InpNoOpposite       = true;         // Ek engine BUY me ho
 input group "=== Lot Size (shared) ==="
 input ENUM_LOT_MODE   InpLotMode          = LOT_AUTO;     // Lot mode
 input double          InpFixedLot         = 0.01;         // Fixed first lot
-input double          InpBalancePerLot    = 1000.0;       // AUTO: har itne $ balance par 0.01 lot
+input double          InpBalancePerLot    = 2000.0;       // AUTO: har itne $ balance par 0.01 lot
 input double          InpMaxLot           = 2.0;          // Max lot per layer
 input ENUM_LOT_PROG   InpLotProgression   = PROG_FIXED_ADD; // DCA lot: Multiplier (x) ya Fixed Add (+)
 input double          InpLotAddFactor     = 0.5;          // Fixed Add: har layer par +pehla lot x ye (1.0 = 0.01,0.02,0.03..)
@@ -52,7 +52,7 @@ input ENUM_TP_MODE    InpScTPMode         = TP_ATR;           // Scalp TP mode
 input double          InpScTP             = 1.0;              // Scalp fixed TP ($ from average)
 input double          InpScTP_ATR         = 0.6;              // Scalp TP ATR x
 input double          InpScTPMin          = 0.8;              // Scalp min TP ($)
-input double          InpScStopPct        = 6.0;              // Scalp basket hard stop (% equity)
+input double          InpScStopPct        = 10.0;              // Scalp basket hard stop (% equity)
 input int             InpScCooldownMin    = 2;                // Scalp cooldown (min)
 input int             InpScMaxBaskets     = 30;               // Scalp max baskets/day
 input double          InpScMaxATR         = 8.0;              // Scalp: signal ATR max ($)
@@ -73,7 +73,7 @@ input ENUM_TP_MODE    InpInTPMode         = TP_ATR;           // Intraday TP mod
 input double          InpInTP             = 2.0;              // Intraday fixed TP ($ from average)
 input double          InpInTP_ATR         = 0.5;              // Intraday TP ATR x
 input double          InpInTPMin          = 1.5;              // Intraday min TP ($)
-input double          InpInStopPct        = 12.0;             // Intraday basket hard stop (% equity)
+input double          InpInStopPct        = 15.0;             // Intraday basket hard stop (% equity)
 input int             InpInCooldownMin    = 5;                // Intraday cooldown (min)
 input int             InpInMaxBaskets     = 20;               // Intraday max baskets/day
 input double          InpInMaxATR         = 15.0;             // Intraday: signal ATR max ($)
@@ -100,7 +100,7 @@ input ENUM_TP_MODE    InpTkTPMode         = TP_ATR;           // Tick TP mode
 input double          InpTkTP             = 0.5;              // Tick fixed TP ($ from average)
 input double          InpTkTP_ATR         = 0.8;              // Tick TP M1 ATR x
 input double          InpTkTPMin          = 0.4;              // Tick min TP ($)
-input double          InpTkStopPct        = 4.0;              // Tick basket hard stop (% equity)
+input double          InpTkStopPct        = 8.0;              // Tick basket hard stop (% equity)
 input int             InpTkCooldownSec    = 30;               // Tick cooldown (seconds)
 input int             InpTkMaxBaskets     = 60;               // Tick max baskets/day
 input double          InpTkMaxATR         = 4.0;              // Tick: M1 ATR max ($)
@@ -110,6 +110,9 @@ input group "=== DCA / Exit (shared) ==="
 input int             InpMinSecBetween    = 60;           // Layers ke beech min seconds
 input bool            InpAddOnlyInTrend   = true;         // Trend palat jaye to naya layer mat jodo
 input bool            InpBrokerSLTP       = true;         // Auto SL/TP broker par bhi lagao
+input bool            InpBEExit           = true;         // Breakeven exit: kaafi layers ke baad average par wapas aaye to nikal jao
+input int             InpBEMinLayers      = 3;            // Breakeven exit kitne layers ke baad
+input double          InpBEBuffer         = 0.5;          // Average se itna $ upar (cost cover) par close
 input double          InpMaxTotalLots     = 0.0;          // Ek basket ka max total lot (0 = no limit)
 input bool            InpNewCandleLayer   = true;         // Ek candle me max 1 layer (naya candle aane par hi agla layer)
 
@@ -541,6 +544,18 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
       PrintFormat("[%s] BASKET HARD STOP: loss %.2f (%.1f%%). Sab close.", e.name, profit, e.stopPct);
       CloseBasket(e);
       return;
+     }
+
+   //--- 2b) Breakeven exit (lambi DCA ke baad average par lautne par)
+   if(InpBEExit && !e.trailActive && layers >= InpBEMinLayers && profit > 0)
+     {
+      bool be = (dir == 1) ? (bid >= avg + InpBEBuffer) : (ask <= avg - InpBEBuffer);
+      if(be)
+        {
+         PrintFormat("[%s] Breakeven exit: %d layers, profit %.2f", e.name, layers, profit);
+         CloseBasket(e);
+         return;
+        }
      }
 
    //--- 3) News se pehle profit lock
@@ -1433,7 +1448,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.50 | %s\n"
+      "GoldDCA_EA v2.60 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1574,7 +1589,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.50  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v2.60  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;

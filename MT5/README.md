@@ -107,3 +107,8 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **Alerts:** naya HIGH signal par MT5 popup + phone push (MT5 app me MetaQuotes ID set karein)
 - **DCA:** Scalp, Intraday, Tick-M1 – teeno me har $11 against par naya layer (step growth 1.0), layers unlimited (0); rok sirf hard stop / cutloss / trend-flip / margin / `InpMaxTotalLots`
 - **50% booking:** basket TP level aate hi 50% volume close, baaki trailing SL par (`InpBookPct`)
+
+## v2.60 – Customised settings (preset: `Presets/GoldDCA_Recommended.set`)
+- Lot: 0.01 per $2,000 balance (fixed-add 0.5) | DCA $11, unlimited layers
+- Hard stop: Scalp 10%, Intraday 15%, Tick 8% equity
+- **Breakeven exit:** 3+ layers ke baad price average + $0.50 par aaye to poora basket close
