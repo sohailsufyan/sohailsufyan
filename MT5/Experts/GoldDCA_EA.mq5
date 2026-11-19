@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.80"
+#property version   "3.81"
 
 #include <Trade/Trade.mqh>
 
@@ -297,6 +297,8 @@ struct Engine
    double            maxMove;   // average se sabse zyada favourable move (backup exit ke liye)
    bool              dcaPaused; // reversal ki wajah se DCA ruka hai
    datetime          recLast;   // aakhri recovery hedge kab khula
+   string            dcaWhy;    // DCA abhi kyun nahi juda
+   double            dcaNext;   // agla DCA price
   };
 
 CTrade   trade;
@@ -362,7 +364,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false; e.recLast = 0;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false; e.recLast = 0; e.dcaWhy = ""; e.dcaNext = 0;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -748,45 +750,53 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
       return;
      }
 
-   //--- 4) DCA layer
-   if(!e.on || dayStopped || e.trailActive || rtPaused) return;
-   if(TimeCurrent() < cutlossUntil) return;
-   if(InpFriNoDCA && FridayLate(InpFriHour)) return;
+   //--- 4) DCA layer (har rukawat ka kaaran e.dcaWhy me, panel par dikhta hai)
+   double stepNow = BaseStep(e) * MathPow(e.stepGrowth, layers - 1);
+   e.dcaNext = (dir == 1) ? lastPrice - stepNow : lastPrice + stepNow;
+   if(!e.on)            { e.dcaWhy = "engine OFF"; return; }
+   if(dayStopped)       { e.dcaWhy = "day stopped"; return; }
+   if(e.trailActive)    { e.dcaWhy = "trailing (profit lock)"; return; }
+   if(rtPaused)         { e.dcaWhy = "PAUSE button"; return; }
+   if(TimeCurrent() < cutlossUntil) { e.dcaWhy = "cutloss cooldown"; return; }
+   if(InpFriNoDCA && FridayLate(InpFriHour)) { e.dcaWhy = "Friday late"; return; }
    bool hedgeLayer = ReducesNet(dir, LayerLot(e, layers));
-   if(!hedgeLayer && !AccountRoomOK(LayerLot(e, layers))) return;
-   if(e.maxLayers > 0 && layers >= e.maxLayers) return;
+   if(!hedgeLayer && !AccountRoomOK(LayerLot(e, layers))) { e.dcaWhy = "margin/lot limit"; return; }
+   if(e.maxLayers > 0 && layers >= e.maxLayers) { e.dcaWhy = "max layers"; return; }
    if(InpMaxTotalLots > 0)
      {
       double cur = 0;
       for(int i = PositionsTotal() - 1; i >= 0; i--)
          if(PositionGetTicket(i) != 0 && IsMine(e)) cur += PositionGetDouble(POSITION_VOLUME);
-      if(cur + LayerLot(e, layers) > InpMaxTotalLots + 1e-9) return;
+      if(cur + LayerLot(e, layers) > InpMaxTotalLots + 1e-9) { e.dcaWhy = "basket max lots"; return; }
      }
-   if(InpNewCandleLayer && iTime(_Symbol, e.sigTF, 0) == e.lastLayerBar) return;
    if(InpVWAPDCA && vwap > 0)
      {
       double band = vwapSD * InpVWAPBandSD;
-      if(dir == 1 && ask > vwap - band) return;      // BUY layer sirf discount zone me
-      if(dir == -1 && bid < vwap + band) return;     // SELL layer sirf premium zone me
+      if(dir == 1 && ask > vwap - band)  { e.dcaWhy = "VWAP band"; return; }
+      if(dir == -1 && bid < vwap + band) { e.dcaWhy = "VWAP band"; return; }
      }
-   if(InpUseNews && InpNewsNoDCA && newsActive) return;
-   if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) return;
-   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > e.maxSpread) return;
-   if(InpAddOnlyInTrend && TrendDir(e.hTF, e.hTS, e.trendTF) != dir) return;
+   if(InpUseNews && InpNewsNoDCA && newsActive) { e.dcaWhy = "news"; return; }
+   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > e.maxSpread)
+     { e.dcaWhy = StringFormat("spread %d > %d", (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), e.maxSpread); return; }
+   if(InpAddOnlyInTrend && TrendDir(e.hTF, e.hTS, e.trendTF) != dir) { e.dcaWhy = "trend against"; return; }
    bool rev = InpPauseOnReversal && ReversalAgainst(dir);
    if(rev != e.dcaPaused)
       PrintFormat("[%s] DCA %s", e.name, rev ? "PAUSED - high probability reversal" : "RESUMED");
    e.dcaPaused = rev;
-   if(rev) return;
+   if(rev) { e.dcaWhy = "reversal pause"; return; }
 
-   double step = BaseStep(e) * MathPow(e.stepGrowth, layers - 1);
-   bool add = (dir == 1) ? (ask <= lastPrice - step) : (bid >= lastPrice + step);
-   if(!add) return;
+   bool add = (dir == 1) ? (ask <= e.dcaNext) : (bid >= e.dcaNext);
+   if(!add) { e.dcaWhy = StringFormat("waiting $%.0f", stepNow); return; }
+   if(InpNewCandleLayer && iTime(_Symbol, e.sigTF, 0) == e.lastLayerBar) { e.dcaWhy = "next candle"; return; }
+   if(TimeCurrent() - e.lastLayerTime < InpMinSecBetween) { e.dcaWhy = "min gap sec"; return; }
 
    double lot = LayerLot(e, layers);
-   if(!hedgeLayer && !MarginOK(dir, lot)) { PrintFormat("[%s] Margin kam - DCA layer skip.", e.name); return; }
+   if(!hedgeLayer && !MarginOK(dir, lot)) { e.dcaWhy = "free margin kam"; return; }
+   e.dcaWhy = "";
    if(Open(e, dir, lot, "L" + IntegerToString(layers + 1)))
       PrintFormat("[%s] DCA layer %d @ %.2f, lot %.2f", e.name, layers + 1, dir == 1 ? ask : bid, lot);
+   else
+      e.dcaWhy = StringFormat("order fail %d", trade.ResultRetcode());
   }
 
 void CloseBasket(Engine &e)
@@ -1661,7 +1671,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.80 | %s\n"
+      "GoldDCA_EA v3.81 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1812,7 +1822,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.80  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.81  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1926,7 +1936,8 @@ void ShowPanel()
       color stc = (st == "SCANNING" || st == "DCA ACTIVE") ? cAcc : (StringFind(st, "TRAIL") >= 0 ? cBuy : (st == "OFF" ? cDim : cWarn));
       PText("engS" + ks, W - 16, y + 2, st, stc, 8, true, ANCHOR_RIGHT_UPPER);
       string info = layers > 0 ?
-                    StringFormat("%d/%s layers  %.2f lot  avg %.2f  P/L %+.2f", layers, MaxStr(E[k].maxLayers), lots, avg, pr) :
+                    StringFormat("%dL %.2flot avg %.2f %+.2f | DCA@%.2f %s", layers, lots, avg, pr,
+                                 E[k].dcaNext, E[k].dcaWhy == "" ? "ready" : E[k].dcaWhy) :
                     StringFormat("DCA $%.0f | max %s layers | %d baskets today", E[k].step, MaxStr(E[k].maxLayers), E[k].basketsToday);
       PText("engI" + ks, 16, y + 16, info, layers > 0 ? (pr >= 0 ? cBuy : cSell) : cDim, 8);
       y += 35;
