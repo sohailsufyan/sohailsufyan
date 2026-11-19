@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.80"
+#property version   "2.90"
 
 #include <Trade/Trade.mqh>
 
@@ -19,7 +19,8 @@ enum ENUM_STEP_MODE { STEP_FIXED_PRICE = 0, STEP_ATR = 1 };
 enum ENUM_TP_MODE   { TP_FIXED_PRICE = 0, TP_ATR = 1 };
 enum ENUM_LOT_PROG  { PROG_MULTIPLIER = 0, PROG_FIXED_ADD = 1 };
 enum ENUM_MAN_ENG   { MAN_SCALP = 0, MAN_INTRADAY = 1, MAN_TICK = 2 };
-#define NE 3   // engines: 0 = SCALP, 1 = INTRADAY, 2 = TICK M1
+#define NT 3   // engine types: 0 = SCALP, 1 = INTRADAY, 2 = TICK M1
+#define NE 6   // engine slots: 0-2 = BUY side (ya dono side jab hedge off), 3-5 = SELL side (hedge mode)
 
 input group "=== General ==="
 input long            InpMagic            = 888001;       // Base magic (Scalp +1, Intraday +2, Tick M1 +3)
@@ -27,7 +28,8 @@ input string          InpComment          = "GoldDCA";    // Order comment
 input ENUM_TIMEFRAMES InpMasterTF         = PERIOD_H1;    // Master trend timeframe (dono engine follow karenge)
 input int             InpMasterFastEMA    = 50;           // Master fast EMA
 input int             InpMasterSlowEMA    = 200;          // Master slow EMA
-input bool            InpNoOpposite       = true;         // Ek engine BUY me ho to doosra SELL na khole
+input bool            InpHedgeMode        = true;         // HEDGE: BUY aur SELL basket ek saath alag-alag chal sakte hain
+input bool            InpNoOpposite       = true;         // (Hedge OFF par) ek engine BUY me ho to doosra SELL na khole
 
 input group "=== Lot Size (shared) ==="
 input ENUM_LOT_MODE   InpLotMode          = LOT_AUTO;     // Lot mode
@@ -234,6 +236,7 @@ struct Engine
    bool              trailActive, manual, booked;
    double            trailSL;
    int               adoptDir;
+   int               side;      // 1 = sirf BUY basket, -1 = sirf SELL basket, 0 = dono
   };
 
 CTrade   trade;
@@ -287,7 +290,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -339,6 +342,28 @@ int OnInit()
    E[1].manual = InpManageManual && InpManualEngine == MAN_INTRADAY && InpInOn;
    E[2].manual = InpManageManual && InpManualEngine == MAN_TICK && InpTkOn;
 
+   //--- Hedge mode: har engine ka BUY aur SELL basket alag (slot 3-5 = SELL)
+   for(int t = 0; t < NT; t++)
+     {
+      if(!SetupEngine(E[t + NT], E[t].name, E[t].on, E[t].magic, E[t].sigTF, E[t].trendTF, E[t].lotFactor, E[t].lotMult,
+                      E[t].stepMode, E[t].step, E[t].stepATR, E[t].stepGrowth, E[t].maxLayers,
+                      E[t].tpMode, E[t].tp, E[t].tpATR, E[t].tpMin, E[t].stopPct, 0, E[t].maxBaskets, E[t].maxATR, E[t].minATR))
+        { Print("Hedge engine indicator error: ", GetLastError()); return(INIT_FAILED); }
+      E[t + NT].cooldownSec = E[t].cooldownSec; E[t + NT].tickMode = E[t].tickMode; E[t + NT].useMACD = E[t].useMACD;
+      E[t + NT].maxSpread = E[t].maxSpread; E[t + NT].tag = E[t].tag; E[t + NT].manual = E[t].manual;
+      if(InpHedgeMode)
+        {
+         E[t].side = 1;       E[t].name = E[t].name + "-BUY";
+         E[t + NT].side = -1; E[t + NT].name = E[t + NT].name + "-SELL";
+        }
+      else
+        {
+         E[t + NT].on = false;
+         E[t + NT].magic = -100 - t;      // hedge off: ye slot kisi position ko match nahi karega
+         E[t + NT].manual = false;
+        }
+     }
+
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: Ye EA HEDGING account ke liye hai. Netting account par layers merge ho jayenge.");
    if(InpScStopPct <= 0 || InpInStopPct <= 0)
@@ -383,6 +408,7 @@ void OnTick()
 
    for(int k = 0; k < NE; k++)
      {
+      if(!InpHedgeMode && k >= NT) continue;
       UpdateAdopt(E[k]);
       if(!E[k].on && CountLayers(E[k]) == 0) continue;
       int dir, layers; double avg, lots, lastPrice, profit;
@@ -439,6 +465,11 @@ bool IsForeign(long mg)
 bool IsMine(Engine &e)
   {
    if(PositionGetString(POSITION_SYMBOL) != _Symbol) return false;
+   if(e.side != 0)
+     {
+      int pd = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      if(pd != e.side) return false;
+     }
    long mg = PositionGetInteger(POSITION_MAGIC);
    if(mg == e.magic) return true;
    if(!e.manual || e.adoptDir == 0 || !IsForeign(mg)) return false;
@@ -458,6 +489,7 @@ void UpdateAdopt(Engine &e)
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       long mg = PositionGetInteger(POSITION_MAGIC);
       int d = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      if(e.side != 0 && d != e.side) continue;
       if(mg == e.magic) { e.adoptDir = d; return; }       // apna basket chal raha hai
       if(IsForeign(mg))
         {
@@ -1014,11 +1046,12 @@ void TryNewBasket(Engine &e, int k)
       sig = Signal(e);
      }
    if(sig == 0) return;
+   if(e.side != 0 && sig != e.side) return;
    if(sig == 1 && (!InpAllowBuy || rtSide == -1)) return;
    if(sig == -1 && (!InpAllowSell || rtSide == 1)) return;
 
    // Doosre engine ka basket ulti direction me ho to skip
-   if(InpNoOpposite)
+   if(InpNoOpposite && !InpHedgeMode)
      {
       for(int j = 0; j < NE; j++)
         {
@@ -1455,7 +1488,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.80 | %s\n"
+      "GoldDCA_EA v2.90 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1466,8 +1499,8 @@ void ShowTextPanel()
       mt == 1 ? "UP - sirf BUY" : (mt == -1 ? "DOWN - sirf SELL" : "SIDEWAYS - no entry"),
       newsActive ? "HIGH IMPACT - paused" : "Clear",
       scanLine,
-      EngineLine(E[0]), EngineLine(E[1]), EngineLine(E[2]),
-      DayPLPct(), InpDailyTargetPct, DayLossPct(), E[0].tradesToday + E[1].tradesToday + E[2].tradesToday));
+      EngineLine(E[0]) + "\n" + EngineLine(E[3]), EngineLine(E[1]) + "\n" + EngineLine(E[4]), EngineLine(E[2]) + "\n" + EngineLine(E[5]),
+      DayPLPct(), InpDailyTargetPct, DayLossPct(), TradesToday()));
   }
 //+------------------------------------------------------------------+
 
@@ -1548,6 +1581,13 @@ string ISTTime(int gmtHour)
    return StringFormat("%02d:%02d IST", mins / 60, mins % 60);
   }
 
+int TradesToday()
+  {
+   int n = 0;
+   for(int k = 0; k < NE; k++) n += E[k].tradesToday;
+   return n;
+  }
+
 double DayLossPct() { return rtDayLoss >= 0 ? rtDayLoss : InpDailyLossPct; }
 
 string MaxStr(int m) { return m > 0 ? IntegerToString(m) : "unlimited"; }
@@ -1598,7 +1638,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.80  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v2.90  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1679,28 +1719,30 @@ void ShowPanel()
    y += 28;
 
    // ---- engines
-   PText("engT", 10, y, "ENGINES", cDim, 7, true);
+   PText("engT", 10, y, InpHedgeMode ? "ENGINES  (HEDGE: BUY + SELL alag basket)" : "ENGINES", cDim, 7, true);
    y += 14;
-   for(int k = 0; k < NE; k++)
+   int nShow = InpHedgeMode ? NE : NT;
+   for(int r = 0; r < nShow; r++)
      {
+      int k = InpHedgeMode ? ((r % 2 == 0) ? r / 2 : r / 2 + NT) : r;     // SCALP-B, SCALP-S, INTRA-B, ...
       int d, layers; double avg, lots, lp, pr;
       GetBasket(E[k], d, layers, avg, lots, lp, pr);
       string st = EngineState(E[k], layers);
-      string ks = IntegerToString(k);
-      PRect("eng" + ks, 8, y, W - 16, 34, cCard, cLine);
-      PText("engN" + ks, 16, y + 3, E[k].name, cTxt, 8, true);
+      string ks = IntegerToString(r);
+      PRect("eng" + ks, 8, y, W - 16, 32, cCard, cLine);
+      color nc = E[k].side == 1 ? cBuy : (E[k].side == -1 ? cSell : cTxt);
+      PText("engN" + ks, 16, y + 2, E[k].name, nc, 8, true);
       color stc = (st == "SCANNING" || st == "DCA ACTIVE") ? cAcc : (StringFind(st, "TRAIL") >= 0 ? cBuy : (st == "OFF" ? cDim : cWarn));
-      PText("engS" + ks, W - 16, y + 3, st, stc, 8, true, ANCHOR_RIGHT_UPPER);
+      PText("engS" + ks, W - 16, y + 2, st, stc, 8, true, ANCHOR_RIGHT_UPPER);
       string info = layers > 0 ?
-                    StringFormat("%s  %d/%s layers  %.2f lot  avg %.2f  P/L %+.2f", d == 1 ? "BUY" : "SELL", layers, MaxStr(E[k].maxLayers), lots, avg, pr) :
+                    StringFormat("%d/%s layers  %.2f lot  avg %.2f  P/L %+.2f", layers, MaxStr(E[k].maxLayers), lots, avg, pr) :
                     StringFormat("DCA $%.0f | max %s layers | %d baskets today", E[k].step, MaxStr(E[k].maxLayers), E[k].basketsToday);
-      PText("engI" + ks, 16, y + 18, info, layers > 0 ? (pr >= 0 ? cBuy : cSell) : cDim, 8);
-      y += 38;
+      PText("engI" + ks, 16, y + 16, info, layers > 0 ? (pr >= 0 ? cBuy : cSell) : cDim, 8);
+      y += 35;
      }
 
    // ---- today
-   int trades = 0;
-   for(int k = 0; k < NE; k++) trades += E[k].tradesToday;
+   int trades = TradesToday();
    double dpl = DayPLPct();
    PText("today", 10, y + 2, StringFormat("Today: %+.2f%%  (target %.0f%% | max loss %.0f%%)  |  %d trades", dpl, InpDailyTargetPct, DayLossPct(), trades),
          dpl >= 0 ? cBuy : cSell, 8, true);
@@ -1710,9 +1752,10 @@ void ShowPanel()
    PText("ctlT", 10, y, "CONTROLS", cDim, 7, true);
    y += 14;
    int bw = (W - 16 - 8) / 3;
-   for(int k = 0; k < NE; k++)
+   string tn[NT] = {"SCALP", "INTRADAY", "TICK-M1"};
+   for(int k = 0; k < NT; k++)
       PButton("btn_eng" + IntegerToString(k), 8 + k * (bw + 4), y, bw, 22,
-              E[k].name + (E[k].on ? "  ON" : "  OFF"), E[k].on ? cBuy : cLine, E[k].on ? cBg : cTxt);
+              tn[k] + (E[k].on ? "  ON" : "  OFF"), E[k].on ? cBuy : cLine, E[k].on ? cBg : cTxt);
    y += 26;
    string sideTxt = rtSide == 0 ? "BUY + SELL" : (rtSide == 1 ? "BUY ONLY" : "SELL ONLY");
    PButton("btn_side", 8, y, bw * 2 + 4, 22, "Direction: " + sideTxt, rtSide == 0 ? cAcc : (rtSide == 1 ? cBuy : cSell), cBg);
@@ -1806,6 +1849,7 @@ void LoadControls()
    for(int k = 0; k < NE; k++)
       if(GlobalVariableCheck(gvCtl + "on" + IntegerToString(k)))
          E[k].on = GlobalVariableGet(gvCtl + "on" + IntegerToString(k)) > 0.5;
+   if(!InpHedgeMode) for(int k = NT; k < NE; k++) E[k].on = false;
    PrintFormat("Saved controls loaded: paused=%s side=%d lot=%.1fx step=$%.0f", rtPaused ? "yes" : "no", rtSide, rtLotMult, E[1].step);
   }
 
@@ -1818,7 +1862,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    if(StringFind(b, "eng") == 0)
      {
       int k = (int)StringToInteger(StringSubstr(b, 3));
-      if(k >= 0 && k < NE) { E[k].on = !E[k].on; PrintFormat("[%s] %s (button)", E[k].name, E[k].on ? "ON" : "OFF"); }
+      if(k >= 0 && k < NT)
+        {
+         E[k].on = !E[k].on;
+         if(InpHedgeMode) E[k + NT].on = E[k].on;
+         PrintFormat("[%s] %s (button)", E[k].name, E[k].on ? "ON" : "OFF");
+        }
      }
    else if(b == "side")  { rtSide = (rtSide == 0) ? 1 : (rtSide == 1 ? -1 : 0); }
    else if(b == "pause") { rtPaused = !rtPaused; Print(rtPaused ? "EA PAUSED - naye trade/DCA band, exits chalte rahenge" : "EA RESUMED"); }

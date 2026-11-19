@@ -126,3 +126,9 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Default hard stop: Scalp / Intraday / Tick = **80% equity**, daily loss limit = **80%**
 - Panel buttons: **Hard SL − / +** (5% step, sab engines) aur **Day loss − / +** (5% step); restart ke baad bhi yaad
 - WARNING: 80% par ek bura basket account ka 80% le sakta hai
+
+## v2.90 – Hedge mode (BUY + SELL dono)
+- `InpHedgeMode = true` (default): har engine ka **BUY basket aur SELL basket alag-alag** chal sakte hain (SCALP-BUY / SCALP-SELL, INTRADAY-BUY / -SELL, TICK-M1-BUY / -SELL)
+- Dono side apna DCA ($11), TP, 50% book, trailing, breakeven aur hard stop alag rakhte hain
+- Naya basket ab bhi trend ki direction me hi khulta hai; trend palatne par purana basket chalta rehta hai (uska DCA ruk jata hai) aur nayi direction ka basket khul jata hai
+- Panel par 6 engine rows (BUY hara, SELL laal); ON/OFF button dono side ek saath
