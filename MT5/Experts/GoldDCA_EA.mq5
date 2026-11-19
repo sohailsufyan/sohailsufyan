@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "2.91"
+#property version   "2.92"
 
 #include <Trade/Trade.mqh>
 
@@ -113,7 +113,7 @@ input int             InpMinSecBetween    = 60;           // Layers ke beech min
 input bool            InpAddOnlyInTrend   = false;        // true = trend palatne par DCA ruk jaye; false = BUY aur SELL dono side DCA hamesha chalu
 input bool            InpBrokerSLTP       = true;         // Auto SL/TP broker par bhi lagao
 input bool            InpBEExit           = true;         // Breakeven exit: kaafi layers ke baad average par wapas aaye to nikal jao
-input int             InpBEMinLayers      = 3;            // Breakeven exit kitne layers ke baad
+input int             InpBEMinLayers      = 2;            // Itne ya zyada layers (DCA hua) to profit hote hi poora basket close
 input double          InpBEBuffer         = 0.5;          // Average se itna $ upar (cost cover) par close
 input double          InpMaxTotalLots     = 0.0;          // Ek basket ka max total lot (0 = no limit)
 input bool            InpNewCandleLayer   = true;         // Ek candle me max 1 layer (naya candle aane par hi agla layer)
@@ -1488,7 +1488,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v2.91 | %s\n"
+      "GoldDCA_EA v2.92 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1638,7 +1638,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v2.91  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v2.92  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;

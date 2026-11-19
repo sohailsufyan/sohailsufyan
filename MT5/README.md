@@ -133,3 +133,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Naya basket ab bhi trend ki direction me hi khulta hai; trend palatne par purana basket chalta rehta hai (uska DCA ruk jata hai) aur nayi direction ka basket khul jata hai
 - Panel par 6 engine rows (BUY hara, SELL laal); ON/OFF button dono side ek saath
 - v2.91: `InpAddOnlyInTrend = false` (default) – BUY aur SELL dono side ka DCA hamesha chalu, chahe basket EA ne khola ho ya manual trade ho
+- v2.92: retracement exit – DCA wala basket (2+ layers) BUY ho ya SELL, average + $0.50 profit aate hi poora close (`InpBEMinLayers = 2`)
