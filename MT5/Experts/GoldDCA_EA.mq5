@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.40"
+#property version   "4.00"
 
 #include <Trade/Trade.mqh>
 
@@ -18,9 +18,9 @@ enum ENUM_LOT_MODE  { LOT_FIXED = 0, LOT_AUTO = 1 };
 enum ENUM_STEP_MODE { STEP_FIXED_PRICE = 0, STEP_ATR = 1 };
 enum ENUM_TP_MODE   { TP_FIXED_PRICE = 0, TP_ATR = 1 };
 enum ENUM_LOT_PROG  { PROG_MULTIPLIER = 0, PROG_FIXED_ADD = 1 };
-enum ENUM_MAN_ENG   { MAN_SCALP = 0, MAN_INTRADAY = 1, MAN_TICK = 2 };
-#define NT 3   // engine types: 0 = SCALP, 1 = INTRADAY, 2 = TICK M1
-#define NE 6   // engine slots: 0-2 = BUY side (ya dono side jab hedge off), 3-5 = SELL side (hedge mode)
+enum ENUM_MAN_ENG   { MAN_SCALP = 0, MAN_INTRADAY = 1, MAN_TICK = 2, MAN_SWING = 3 };
+#define NT 4   // engine types: 0 = SCALP, 1 = INTRADAY, 2 = TICK M1, 3 = SWING H1
+#define NE 8   // engine slots: 0-3 = BUY side (ya dono side jab hedge off), 4-7 = SELL side (hedge mode)
 
 input group "=== General ==="
 input long            InpMagic            = 888001;       // Base magic (Scalp +1, Intraday +2, Tick M1 +3)
@@ -107,6 +107,36 @@ input int             InpTkCooldownSec    = 30;               // Tick cooldown (
 input int             InpTkMaxBaskets     = 60;               // Tick max baskets/day
 input double          InpTkMaxATR         = 4.0;              // Tick: M1 ATR max ($)
 input double          InpTkMinATR         = 0.3;              // Tick: M1 ATR min ($)
+
+input group "=== SWING H1 Engine (Daily regime) ==="
+input bool            InpSwOn             = true;             // Swing H1 ON
+input ENUM_TIMEFRAMES InpSwSigTF          = PERIOD_H1;        // Swing signal TF
+input ENUM_TIMEFRAMES InpSwTrendTF        = PERIOD_H4;        // Swing trend TF
+input double          InpSwStep           = 11.0;             // Swing DCA step ($)
+input double          InpSwStopPct        = 80.0;             // Swing basket hard stop (% equity)
+input int             InpSwCooldownMin    = 30;               // Swing cooldown (min)
+input int             InpSwMaxBaskets     = 10;               // Swing max baskets/day
+input double          InpSwMaxATR         = 40.0;             // Swing: H1 ATR max ($)
+input double          InpSwMinATR         = 2.0;              // Swing: H1 ATR min ($)
+
+input group "=== RSI Regime (Daily -> H1, H4 -> M15) ==="
+input bool            InpUseRegime        = true;             // Regime filter ON: BUY sirf uptrend, SELL sirf downtrend
+input int             InpRegimeRSI        = 7;                // Regime RSI period
+input double          InpRegimeLow        = 40;               // RSI 40 ke upar = uptrend start; 40 ke neeche (downtrend me) = ultra bearish
+input double          InpRegimeHigh       = 60;               // RSI 60 ke neeche = downtrend start; 60 ke upar (uptrend me) = strong bullish
+input ENUM_TIMEFRAMES InpScRegimeTF       = PERIOD_H1;        // Scalp M5 ka regime TF
+input ENUM_TIMEFRAMES InpInRegimeTF       = PERIOD_H4;        // Intraday M15 ka regime TF (H4 -> M15)
+input ENUM_TIMEFRAMES InpTkRegimeTF       = PERIOD_H1;        // Tick M1 ka regime TF
+input ENUM_TIMEFRAMES InpSwRegimeTF       = PERIOD_D1;        // Swing H1 ka regime TF (Daily -> H1)
+input double          InpStrongStepMult   = 1.5;              // Strong (high volatility) regime me DCA gap x ye
+
+input group "=== RSI Divergence + EMA / Pivot Reaction Zones ==="
+input int             InpDivRSI           = 7;                // Divergence RSI period
+input int             InpDivLookback      = 40;               // Divergence kitne candles me dhoondhe
+input bool            InpDivRequired      = false;            // Entry ke liye divergence zaroori (false = score bonus)
+input bool            InpUseZones         = true;             // EMA 21/34/50/200 + Pivot reaction zones score me
+input double          InpZoneTouchATR     = 0.3;              // Zone touch tolerance (ATR x)
+input bool            InpDrawZonesEP      = true;             // Chart par EMA (chart TF) aur daily pivots draw karo
 
 input group "=== DCA / Exit (shared) ==="
 input int             InpMinSecBetween    = 60;           // Layers ke beech min seconds
@@ -264,6 +294,12 @@ struct Engine
    int               tpMode; double tp, tpATR, tpMin;
    double            stopPct, maxATR, minATR;
    int               cooldownSec, maxBaskets;
+   ENUM_TIMEFRAMES   regTF;
+   int               hReg, hDiv, hE21, hE34, hE50, hE200;
+   int               regime;    // 2 strong up, 1 up, 0 none, -1 down, -2 ultra bearish
+   datetime          regBar;
+   int               divDir;    // last divergence: 1 bullish, -1 bearish, 0 none
+   datetime          divBar;
    bool              tickMode, useMACD;
    int               maxSpread;
    string            tag;
@@ -312,6 +348,11 @@ datetime lastLevelsBar = 0, lastLevelsTry = 0;
 #define  SRPFX "GDCA_SR_"
 #define  PFX   "GDCA_P_"
 #define  IPFX  "GDCA_I_"
+#define  ZPFX  "GDCA_Z_"
+double   pvP = 0, pvR1 = 0, pvR2 = 0, pvR3 = 0, pvS1 = 0, pvS2 = 0, pvS3 = 0;
+datetime pvDay = 0;
+int      hChE[4] = {INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE, INVALID_HANDLE};
+datetime zDrawBar = 0;
 
 //--- Institutional state
 int      stBias = 0;           // 1 = bullish structure, -1 = bearish
@@ -346,6 +387,8 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
    e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false; e.escReason = "";
+   e.regTF = PERIOD_H4; e.hReg = e.hDiv = e.hE21 = e.hE34 = e.hE50 = e.hE200 = INVALID_HANDLE;
+   e.regime = 0; e.regBar = 0; e.divDir = 0; e.divBar = 0;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -360,6 +403,11 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
 
 void ReleaseEngine(Engine &e)
   {
+   if(e.hReg != INVALID_HANDLE)
+     {
+      IndicatorRelease(e.hReg); IndicatorRelease(e.hDiv); IndicatorRelease(e.hE21);
+      IndicatorRelease(e.hE34); IndicatorRelease(e.hE50); IndicatorRelease(e.hE200);
+     }
    if(e.hTF == INVALID_HANDLE) return;
    IndicatorRelease(e.hTF); IndicatorRelease(e.hTS); IndicatorRelease(e.hSF); IndicatorRelease(e.hSS);
    IndicatorRelease(e.hRSI); IndicatorRelease(e.hATR); IndicatorRelease(e.hMACD);
@@ -392,10 +440,21 @@ int OnInit()
      { Print("Tick indicator error: ", GetLastError()); return(INIT_FAILED); }
    E[2].tickMode = true; E[2].cooldownSec = InpTkCooldownSec; E[2].useMACD = InpTkUseMACD;
    E[2].maxSpread = InpTkMaxSpread; E[2].tag = "TK";
+   if(!SetupEngine(E[3], "SWING", InpSwOn, InpMagic + 4, InpSwSigTF, InpSwTrendTF, 1.0, 1.2,
+                   STEP_FIXED_PRICE, InpSwStep, 1.0, 1.0, 0,
+                   TP_ATR, 5.0, 0.5, 3.0, InpSwStopPct, InpSwCooldownMin, InpSwMaxBaskets,
+                   InpSwMaxATR, InpSwMinATR))
+     { Print("Swing indicator error: ", GetLastError()); return(INIT_FAILED); }
+   E[3].tag = "SW";
+   ENUM_TIMEFRAMES rtf[NT];
+   rtf[0] = InpScRegimeTF; rtf[1] = InpInRegimeTF; rtf[2] = InpTkRegimeTF; rtf[3] = InpSwRegimeTF;
+   for(int t = 0; t < NT; t++)
+      if(!SetupExtras(E[t], rtf[t])) { Print("Regime/zone indicator error: ", GetLastError()); return(INIT_FAILED); }
 
    E[0].manual = InpManageManual && InpManualEngine == MAN_SCALP && InpScOn;
    E[1].manual = InpManageManual && InpManualEngine == MAN_INTRADAY && InpInOn;
    E[2].manual = InpManageManual && InpManualEngine == MAN_TICK && InpTkOn;
+   E[3].manual = InpManageManual && InpManualEngine == MAN_SWING && InpSwOn;
 
    //--- Hedge mode: har engine ka BUY aur SELL basket alag (slot 3-5 = SELL)
    for(int t = 0; t < NT; t++)
@@ -406,6 +465,7 @@ int OnInit()
         { Print("Hedge engine indicator error: ", GetLastError()); return(INIT_FAILED); }
       E[t + NT].cooldownSec = E[t].cooldownSec; E[t + NT].tickMode = E[t].tickMode; E[t + NT].useMACD = E[t].useMACD;
       E[t + NT].maxSpread = E[t].maxSpread; E[t + NT].tag = E[t].tag; E[t + NT].manual = E[t].manual;
+      if(!SetupExtras(E[t + NT], E[t].regTF)) return(INIT_FAILED);
       if(InpHedgeMode)
         {
          E[t].side = 1;       E[t].name = E[t].name + "-BUY";
@@ -443,6 +503,8 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ObjectsDeleteAll(0, PFX);
    ObjectsDeleteAll(0, IPFX);
+   ObjectsDeleteAll(0, ZPFX);
+   for(int i = 0; i < 4; i++) if(hChE[i] != INVALID_HANDLE) IndicatorRelease(hChE[i]);
    IndicatorRelease(hMF); IndicatorRelease(hMS);
    for(int k = 0; k < NE; k++) ReleaseEngine(E[k]);
    for(int i = 0; i < 5; i++) { IndicatorRelease(hScF[i]); IndicatorRelease(hScS[i]); }
@@ -459,6 +521,7 @@ void OnTick()
    UpdateLevels(false);
    UpdateStructure();
    UpdateVWAP();
+   UpdateZonesTick();
    CheckNewDay();
    UpdateNews();
    CheckCutloss();
@@ -753,6 +816,8 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
    if(rev) return;
 
    double step = BaseStep(e) * MathPow(e.stepGrowth, layers - 1);
+   UpdateRegime(e);
+   if(MathAbs(e.regime) == 2) step *= InpStrongStepMult;     // high volatility regime: gap bada
    bool add = (dir == 1) ? (ask <= lastPrice - step) : (bid >= lastPrice + step);
    if(!add) return;
 
@@ -917,7 +982,8 @@ int ScoreMomentum(int dir)
       if(dir == 1 && pdi > mdi) pts += 5;
       if(dir == -1 && mdi > pdi) pts += 5;
      }
-   return pts;
+   if(DivergenceDir(E[1]) == dir) pts += 5;          // RSI(7) divergence M15 par trade direction me
+   return MathMin(pts, 15);
   }
 
 // 3) Volatility (10): M15 ATR apne 50-bar average ke mukable normal ho
@@ -977,7 +1043,10 @@ int ScoreLiquidity(int dir)
         }
      }
 
-   // Sweep nahi: aage kitni jagah hai (nearest opposing S/R)
+   // Sweep nahi: EMA 21/34/50/200 ya Pivot zone par reaction?
+   if(InpUseZones && ZoneReaction(E[1], dir)) return 12;
+
+   // Aage kitni jagah hai (nearest opposing S/R)
    double nearest = DBL_MAX;
    for(int i = 0; i < ArraySize(levels); i++)
      {
@@ -1178,6 +1247,9 @@ void TryNewBasket(Engine &e, int k)
    if(sig == 0) return;
    if(e.side != 0 && sig != e.side) return;
    if(!InstOK(sig)) return;
+   UpdateRegime(e);
+   if(InpUseRegime && (e.regime == 0 || (e.regime > 0) != (sig > 0))) return;
+   if(InpDivRequired && DivergenceDir(e) != sig) return;
    if(sig == 1 && (!InpAllowBuy || rtSide == -1)) return;
    if(sig == -1 && (!InpAllowSell || rtSide == 1)) return;
 
@@ -1621,7 +1693,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.40 | %s\n"
+      "GoldDCA_EA v4.00 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1632,7 +1704,8 @@ void ShowTextPanel()
       mt == 1 ? "UP - sirf BUY" : (mt == -1 ? "DOWN - sirf SELL" : "SIDEWAYS - no entry"),
       newsActive ? "HIGH IMPACT - paused" : "Clear",
       scanLine,
-      EngineLine(E[0]) + "\n" + EngineLine(E[3]), EngineLine(E[1]) + "\n" + EngineLine(E[4]), EngineLine(E[2]) + "\n" + EngineLine(E[5]),
+      EngineLine(E[0]) + "\n" + EngineLine(E[4]), EngineLine(E[1]) + "\n" + EngineLine(E[5]),
+      EngineLine(E[2]) + "\n" + EngineLine(E[6]) + "\n" + EngineLine(E[3]) + "\n" + EngineLine(E[7]),
       DayPLPct(), InpDailyTargetPct, DayLossPct(), TradesToday()));
   }
 //+------------------------------------------------------------------+
@@ -1773,7 +1846,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.40  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v4.00  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -1869,6 +1942,15 @@ void ShowPanel()
    string vTxt = vwap > 0 ? StringFormat("VWAP %.2f  (%s)  | band +/-%.2f", vwap, bidNow >= vwap ? "price ABOVE -> BUY side" : "price BELOW -> SELL side", vwapSD * InpVWAPBandSD) : "VWAP: -";
    PText("instV", 16, y + 20, vTxt, vwap > 0 ? (bidNow >= vwap ? cBuy : cSell) : cDim, 8);
    y += 44;
+   {
+      UpdateRegime(E[1]); UpdateRegime(E[3]);
+      string r1 = "H4: " + RegimeName(E[1].regime), r2 = "D1: " + RegimeName(E[3].regime);
+      int dv = DivergenceDir(E[1]);
+      PText("regT", 10, y, "REGIME  " + r1 + "  |  " + r2, E[1].regime > 0 ? cBuy : (E[1].regime < 0 ? cSell : cDim), 8, true);
+      PText("divT", 10, y + 15, StringFormat("RSI(%d) div M15: %s  |  Pivot P %.2f", InpDivRSI,
+            dv == 1 ? "BULLISH" : (dv == -1 ? "BEARISH" : "none"), pvP), dv == 1 ? cBuy : (dv == -1 ? cSell : cDim), 8);
+      y += 32;
+   }
 
    // ---- engines
    PText("engT", 10, y, InpHedgeMode ? "ENGINES  (HEDGE: BUY + SELL alag basket)" : "ENGINES", cDim, 7, true);
@@ -1904,10 +1986,11 @@ void ShowPanel()
    PText("ctlT", 10, y, "CONTROLS", cDim, 7, true);
    y += 14;
    int bw = (W - 16 - 8) / 3;
-   string tn[NT] = {"SCALP", "INTRADAY", "TICK-M1"};
+   string tn[NT] = {"SCALP", "INTRA", "TICK", "SWING"};
+   int bw4 = (W - 16 - 12) / 4;
    for(int k = 0; k < NT; k++)
-      PButton("btn_eng" + IntegerToString(k), 8 + k * (bw + 4), y, bw, 22,
-              tn[k] + (E[k].on ? "  ON" : "  OFF"), E[k].on ? cBuy : cLine, E[k].on ? cBg : cTxt);
+      PButton("btn_eng" + IntegerToString(k), 8 + k * (bw4 + 4), y, bw4, 22,
+              tn[k] + (E[k].on ? " ON" : " OFF"), E[k].on ? cBuy : cLine, E[k].on ? cBg : cTxt);
    y += 26;
    string sideTxt = rtSide == 0 ? "BUY + SELL" : (rtSide == 1 ? "BUY ONLY" : "SELL ONLY");
    PButton("btn_side", 8, y, bw * 2 + 4, 22, "Direction: " + sideTxt, rtSide == 0 ? cAcc : (rtSide == 1 ? cBuy : cSell), cBg);
@@ -2292,6 +2375,9 @@ string EscapeReason(Engine &e, int dir, int layers, double profit)
    if(InpUseScanner && (MasterTrend() == opp || stBias == opp) && OppScore(opp) >= InpEscapeScore)
       return "reversal risk";
    if(InpEscapeOnNews && InpUseNews && newsSoon) return "news";
+   UpdateRegime(e);
+   if(InpUseRegime && e.regime != 0 && (e.regime > 0) != (dir > 0)) return "regime against";
+   if(DivergenceDir(e) == opp) return "divergence against";
    if(InpEscapeLayers > 0 && layers >= InpEscapeLayers) return StringFormat("%d layers", layers);
    if(InpEscapeDDPct > 0 && profit < 0 && e.basketStartEq > 0 && -profit / e.basketStartEq * 100.0 >= InpEscapeDDPct)
       return "drawdown";
@@ -2301,4 +2387,171 @@ string EscapeReason(Engine &e, int dir, int layers, double profit)
       if(t0 > 0 && (TimeCurrent() - t0) >= InpEscapeHours * 3600) return "old basket";
      }
    return "";
+  }
+
+//==================== RSI REGIME / DIVERGENCE / EMA + PIVOT ZONES ====================
+
+bool SetupExtras(Engine &e, ENUM_TIMEFRAMES regTF)
+  {
+   e.regTF = regTF;
+   e.hReg  = iRSI(_Symbol, regTF, InpRegimeRSI, PRICE_CLOSE);
+   e.hDiv  = iRSI(_Symbol, e.sigTF, InpDivRSI, PRICE_CLOSE);
+   e.hE21  = iMA(_Symbol, e.sigTF, 21, 0, MODE_EMA, PRICE_CLOSE);
+   e.hE34  = iMA(_Symbol, e.sigTF, 34, 0, MODE_EMA, PRICE_CLOSE);
+   e.hE50  = iMA(_Symbol, e.sigTF, 50, 0, MODE_EMA, PRICE_CLOSE);
+   e.hE200 = iMA(_Symbol, e.sigTF, 200, 0, MODE_EMA, PRICE_CLOSE);
+   return !(e.hReg == INVALID_HANDLE || e.hDiv == INVALID_HANDLE || e.hE21 == INVALID_HANDLE ||
+            e.hE34 == INVALID_HANDLE || e.hE50 == INVALID_HANDLE || e.hE200 == INVALID_HANDLE);
+  }
+
+// RSI regime (hysteresis): 40 ke upar cross = uptrend, 60 ke upar = strong; 60 ke neeche cross = downtrend, 40 ke neeche = ultra bearish
+void UpdateRegime(Engine &e)
+  {
+   if(e.hReg == INVALID_HANDLE) return;
+   datetime bar = iTime(_Symbol, e.regTF, 0);
+   if(bar == 0 || bar == e.regBar) return;
+   double r[];
+   ArraySetAsSeries(r, false);                       // oldest first
+   int n = CopyBuffer(e.hReg, 0, 1, 200, r);
+   if(n < 10) return;
+   e.regBar = bar;
+   int st = 0;
+   for(int i = 1; i < n; i++)
+     {
+      double pv = r[i - 1], cv = r[i];
+      if(pv < InpRegimeLow && cv >= InpRegimeLow) st = 1;          // uptrend start
+      else if(pv > InpRegimeHigh && cv <= InpRegimeHigh) st = -1;  // downtrend start
+      if(st >= 1 && cv > InpRegimeHigh) st = 2;                    // strong bullish (high volatility)
+      if(st <= -1 && cv < InpRegimeLow) st = -2;                   // ultra bearish (high volatility)
+      if(st == 2 && cv <= InpRegimeHigh && cv >= InpRegimeLow) st = 1;
+      if(st == -2 && cv >= InpRegimeLow && cv <= InpRegimeHigh) st = -1;
+     }
+   if(st != e.regime)
+      PrintFormat("[%s] Regime (%s RSI%d): %s", e.name, EnumToString(e.regTF), InpRegimeRSI, RegimeName(st));
+   e.regime = st;
+  }
+
+string RegimeName(int st)
+  {
+   if(st == 2)  return "STRONG UP (high vol)";
+   if(st == 1)  return "UPTREND";
+   if(st == -1) return "DOWNTREND";
+   if(st == -2) return "ULTRA BEARISH";
+   return "NEUTRAL";
+  }
+
+// Regular RSI divergence (signal TF): price lower low + RSI higher low = bullish; ulta = bearish
+int DivergenceDir(Engine &e)
+  {
+   if(e.hDiv == INVALID_HANDLE) return 0;
+   datetime bar = iTime(_Symbol, e.sigTF, 0);
+   if(bar == e.divBar) return e.divDir;
+   e.divBar = bar;
+   int N = InpDivLookback, L = 2;
+   double rs[]; MqlRates r[];
+   ArraySetAsSeries(rs, true); ArraySetAsSeries(r, true);
+   if(CopyBuffer(e.hDiv, 0, 1, N, rs) != N || CopyRates(_Symbol, e.sigTF, 1, N, r) != N) { e.divDir = 0; return 0; }
+   int lo1 = -1, lo2 = -1, hi1 = -1, hi2 = -1;      // 1 = sabse naya swing, 2 = usse pehle
+   for(int j = L; j < N - L; j++)
+     {
+      bool isL = true, isH = true;
+      for(int k = 1; k <= L; k++)
+        {
+         if(r[j].low > r[j - k].low || r[j].low >= r[j + k].low) isL = false;
+         if(r[j].high < r[j - k].high || r[j].high <= r[j + k].high) isH = false;
+        }
+      if(isL) { if(lo1 < 0) lo1 = j; else if(lo2 < 0) lo2 = j; }
+      if(isH) { if(hi1 < 0) hi1 = j; else if(hi2 < 0) hi2 = j; }
+     }
+   int d = 0;
+   if(lo1 >= 0 && lo2 >= 0 && lo1 <= 10 && r[lo1].low < r[lo2].low && rs[lo1] > rs[lo2]) d = 1;
+   if(hi1 >= 0 && hi2 >= 0 && hi1 <= 10 && r[hi1].high > r[hi2].high && rs[hi1] < rs[hi2])
+      d = (d == 1 && hi1 > lo1) ? 1 : -1;            // dono hon to jo naya ho
+   e.divDir = d;
+   return d;
+  }
+
+// Standard (classic) daily pivots
+void UpdatePivots()
+  {
+   datetime d0 = iTime(_Symbol, PERIOD_D1, 0);
+   if(d0 == 0 || d0 == pvDay) return;
+   double h = iHigh(_Symbol, PERIOD_D1, 1), l = iLow(_Symbol, PERIOD_D1, 1), c = iClose(_Symbol, PERIOD_D1, 1);
+   if(h <= 0 || l <= 0 || c <= 0) return;
+   pvDay = d0;
+   pvP = (h + l + c) / 3.0;
+   pvR1 = 2 * pvP - l;  pvS1 = 2 * pvP - h;
+   pvR2 = pvP + (h - l); pvS2 = pvP - (h - l);
+   pvR3 = h + 2 * (pvP - l); pvS3 = l - 2 * (h - pvP);
+   DrawZonesEP();
+  }
+
+// Pichle 3 candles me EMA 21/34/50/200 ya pivot ko chhua aur trade direction me close hua?
+bool ZoneReaction(Engine &e, int dir)
+  {
+   double atr[];
+   if(!Buf(e.hATR, 1, 1, atr) || atr[0] <= 0) return false;
+   double tol = atr[0] * InpZoneTouchATR;
+   int hz[4]; hz[0] = e.hE21; hz[1] = e.hE34; hz[2] = e.hE50; hz[3] = e.hE200;
+   double pv[7]; pv[0] = pvP; pv[1] = pvR1; pv[2] = pvR2; pv[3] = pvR3; pv[4] = pvS1; pv[5] = pvS2; pv[6] = pvS3;
+   for(int b = 1; b <= 3; b++)
+     {
+      double lo = iLow(_Symbol, e.sigTF, b), hi = iHigh(_Symbol, e.sigTF, b), cl = iClose(_Symbol, e.sigTF, b);
+      for(int z = 0; z < 4 + 7; z++)
+        {
+         double lv = 0;
+         if(z < 4) lv = B1(hz[z], 0, b);
+         else lv = pv[z - 4];
+         if(lv == EMPTY_VALUE || lv <= 0) continue;
+         if(dir == 1 && lo <= lv + tol && cl > lv) return true;     // support par reaction
+         if(dir == -1 && hi >= lv - tol && cl < lv) return true;    // resistance par reaction
+        }
+     }
+   return false;
+  }
+
+void ZLine(string id, double price, color c, ENUM_LINE_STYLE st, string label)
+  {
+   string n = ZPFX + id;
+   if(price <= 0) return;
+   datetime t1 = iTime(_Symbol, PERIOD_D1, 0), t2 = TimeCurrent() + PeriodSeconds(PERIOD_H1) * 4;
+   if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_TREND, 0, t1, price, t2, price);
+   else { ObjectMove(0, n, 0, t1, price); ObjectMove(0, n, 1, t2, price); }
+   ObjectSetInteger(0, n, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, n, OBJPROP_STYLE, st);
+   ObjectSetInteger(0, n, OBJPROP_RAY_RIGHT, false);
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_BACK, true);
+   string t = n + "_T";
+   if(ObjectFind(0, t) < 0) ObjectCreate(0, t, OBJ_TEXT, 0, t2, price);
+   else ObjectMove(0, t, 0, t2, price);
+   ObjectSetString(0, t, OBJPROP_TEXT, label + " " + DoubleToString(price, _Digits));
+   ObjectSetInteger(0, t, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, t, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, t, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+   ObjectSetInteger(0, t, OBJPROP_SELECTABLE, false);
+  }
+
+
+void DrawZonesEP()
+  {
+   if(!InpDrawZonesEP || (MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_VISUAL_MODE))) return;
+   ZLine("P",  pvP,  clrGold, STYLE_SOLID, "Pivot P");
+   ZLine("R1", pvR1, clrTomato, STYLE_DASH, "R1"); ZLine("R2", pvR2, clrTomato, STYLE_DASH, "R2"); ZLine("R3", pvR3, clrTomato, STYLE_DASH, "R3");
+   ZLine("S1", pvS1, clrLimeGreen, STYLE_DASH, "S1"); ZLine("S2", pvS2, clrLimeGreen, STYLE_DASH, "S2"); ZLine("S3", pvS3, clrLimeGreen, STYLE_DASH, "S3");
+   int per[4] = {21, 34, 50, 200};
+   color ec[4] = {clrAqua, clrViolet, clrOrange, clrWhite};
+   for(int i = 0; i < 4; i++)
+     {
+      if(hChE[i] == INVALID_HANDLE) hChE[i] = iMA(_Symbol, PERIOD_CURRENT, per[i], 0, MODE_EMA, PRICE_CLOSE);
+      double v = B1(hChE[i], 0, 0);
+      if(v != EMPTY_VALUE) ZLine("E" + IntegerToString(per[i]), v, ec[i], STYLE_DOT, "EMA" + IntegerToString(per[i]) + " (" + StringSubstr(EnumToString(Period()), 7) + ")");
+     }
+  }
+
+void UpdateZonesTick()
+  {
+   UpdatePivots();
+   datetime b = iTime(_Symbol, PERIOD_CURRENT, 0);
+   if(b != zDrawBar) { zDrawBar = b; DrawZonesEP(); }
   }

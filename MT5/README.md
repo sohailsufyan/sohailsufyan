@@ -162,3 +162,12 @@ Basket me inme se koi bhi khatra dikhe to **ESCAPE mode**: average se sirf **+$0
 - Basket 6 ghante se purana
 - Basket ka loss equity ka 5%+
 Panel: "ESCAPE: <kaaran>". Inputs: `InpEscape*`
+
+## v4.00 – RSI Regime + Divergence + EMA/Pivot zones + SWING H1 engine
+- **RSI(7) regime** (hysteresis): RSI 40 ke upar cross = **UPTREND**, uptrend me 60 ke upar = **STRONG UP (high vol)**;
+  RSI 60 ke neeche cross = **DOWNTREND**, downtrend me 40 ke neeche = **ULTRA BEARISH**.
+  BUY sirf uptrend me, SELL sirf downtrend me. Strong/ultra regime me DCA gap x1.5
+- **Timeframe jodi:** H4 regime → Intraday M15; **Daily regime → naya SWING H1 engine**; Scalp M5 / Tick M1 → H1 regime (inputs se badal sakte)
+- **RSI(7) divergence:** regular bullish/bearish; trade direction me ho to scanner momentum +5; basket ke khilaf ho to ESCAPE
+- **Reaction zones:** EMA 21 / 34 / 50 / 200 + standard daily pivots (P, R1-R3, S1-S3). Zone par reaction = scanner liquidity 12/15. Chart par draw
+- Panel: REGIME (H4 / D1), divergence, Pivot P; engine buttons ab 4 (SCALP / INTRA / TICK / SWING)
