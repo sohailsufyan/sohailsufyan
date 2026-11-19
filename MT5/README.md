@@ -77,3 +77,11 @@
 - **New candle gate:** ek signal-TF candle me max 1 DCA layer
 - **Cutloss $:** dono engine ka floating loss X $ ho to sab close, 30 min cooldown ke baad resume (ya din band)
 - **Manual trades:** magic 0 wale manual trade Intraday engine ke basket me aa jaate hain, unpar DCA/TP/SL lagta hai
+
+## v2.20 – TICK M1 Scalp engine (3rd engine, magic base + 3)
+- Har tick par check hota hai (bar close ka wait nahi)
+- Entry: H1 master + M5 trend same, M1 EMA9/21 + RSI aligned, aur **pichle 5 sec me trend direction me $0.30+ ka tick burst** (min 5 ticks)
+- $2+ ka jhatka (spike/news) = entry nahi; spread 30 points se zyada = entry nahi
+- DCA step $2 (gap x1.3), max 3 layers, TP 0.8 x M1 ATR (min $0.40), hard stop 4%, cooldown 30 sec
+- Ek M1 candle me max 1 naya basket aur max 1 DCA layer
+- Strategy Tester me **"Every tick based on real ticks"** mode zaroori hai
