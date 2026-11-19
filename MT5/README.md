@@ -161,3 +161,9 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **Telegram:** naya basket, DCA layer, basket close (P/L), net close, cutloss, daily loss, daily report.
   Setup: BotFather se token, @userinfobot se chat ID; MT5 Tools > Options > Expert Advisors > Allow WebRequest: `https://api.telegram.org`
 - v3.70: **Hedge ko limit se chhoot** – jo naya basket ya layer net lot ghatata hai (ulti side ka hedge), wo margin level / kul lot / free margin limit lagne par bhi khul sakta hai; risk badhane wale layer band rehte hain
+
+## v3.80 – Recovery Hedge (kam risk wala hedge)
+- Basket phansa ho (3+ layers ya loss equity ka 3%+) **aur** trend ulta ho (H1 master trend palta ya DCA pause) → usi engine ki ulti side me **turant chhota hedge basket** (phanse lot ka 50%)
+- Martingale nahi: hedge lot kabhi double nahi hota; ek waqt me ek hi hedge; band hone ke baad 15 min cooldown
+- Hedge basket ka apna exit ($3 lock / $5 TP) + **net close** dono basket ko saath profit me nikalta hai
+- Hedge margin/lot limit se chhoot paata hai (net lot ghatata hai)

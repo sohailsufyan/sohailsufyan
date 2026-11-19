@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.70"
+#property version   "3.80"
 
 #include <Trade/Trade.mqh>
 
@@ -152,6 +152,13 @@ input bool            InpNetClose         = true;         // Saare baskets ka to
 input double          InpNetCloseUSD      = 5.0;          // Kam se kam itna $ net profit
 input double          InpNetClosePerLot   = 50.0;         // Ya har 1.00 lot par itna $ (jo bada ho)
 
+input group "=== Recovery Hedge (trend against ho to turant chhota hedge) ==="
+input bool            InpRecHedge         = true;         // Recovery hedge ON (Hedge mode zaroori)
+input int             InpRecLayers        = 3;            // Phanse basket me itne layers ho gaye to (0 = off)
+input double          InpRecDDPct         = 3.0;          // Ya basket loss equity ka itna % (0 = off)
+input double          InpRecRatio         = 50.0;         // Hedge lot = phanse basket ke lot ka itna % (100 = poora barabar)
+input int             InpRecCooldownMin   = 15;           // Ek hedge band hone ke baad dobara kitni der baad
+
 input group "=== Weekend Protection (Friday) ==="
 input bool            InpFriClose         = true;         // Friday shaam basket profit me / average ke paas ho to close
 input int             InpFriHour          = 20;           // Friday kis server hour se
@@ -289,6 +296,7 @@ struct Engine
    int               side;      // 1 = sirf BUY basket, -1 = sirf SELL basket, 0 = dono
    double            maxMove;   // average se sabse zyada favourable move (backup exit ke liye)
    bool              dcaPaused; // reversal ki wajah se DCA ruka hai
+   datetime          recLast;   // aakhri recovery hedge kab khula
   };
 
 CTrade   trade;
@@ -354,7 +362,7 @@ bool SetupEngine(Engine &e, string name, bool on, long magic, ENUM_TIMEFRAMES si
    e.lastSigBar = 0; e.lastCloseTime = 0; e.lastLayerTime = 0;
    e.basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY); e.syncedTP = 0; e.syncedSL = 0;
    e.syncedLayers = 0; e.basketsToday = 0; e.tradesToday = 0;
-   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false;
+   e.lastLayerBar = 0; e.trailActive = false; e.trailSL = 0; e.manual = false; e.adoptDir = 0; e.booked = false; e.side = 0; e.maxMove = 0; e.dcaPaused = false; e.recLast = 0;
    e.hTF = e.hTS = e.hSF = e.hSS = e.hRSI = e.hATR = e.hMACD = INVALID_HANDLE;
    e.hTF   = iMA(_Symbol, tr,  InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    e.hTS   = iMA(_Symbol, tr,  InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
@@ -472,6 +480,7 @@ void OnTick()
    UpdateNews();
    CheckCutloss();
    CheckNetClose();
+   CheckRecoveryHedge();
    if(InpFriForceClose && FridayLate(InpFriForceHour) && TotalLayers() > 0)
      {
       Print("Friday FORCE close - sab baskets band");
@@ -1652,7 +1661,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.70 | %s\n"
+      "GoldDCA_EA v3.80 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1803,7 +1812,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.70  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.80  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -2375,5 +2384,47 @@ void Tg(string msg)
       tgWarned = TimeCurrent();
       PrintFormat("Telegram fail (code %d, err %d). MT5: Tools > Options > Expert Advisors > 'Allow WebRequest' me https://api.telegram.org add karein.",
                   code, GetLastError());
+     }
+  }
+
+//==================== RECOVERY HEDGE ====================
+// Basket phansa (layers / loss) + trend ulta (ya DCA pause) => ulti side me chhota hedge basket.
+// Lot double nahi hota (martingale nahi). Net close dono ko saath profit me nikalta hai.
+void CheckRecoveryHedge()
+  {
+   if(!InpRecHedge || !InpHedgeMode || dayStopped || rtPaused) return;
+   if(TimeCurrent() < cutlossUntil) return;
+   for(int k = 0; k < NE; k++)
+     {
+      int d, layers; double avg, lots, lp, pr;
+      GetBasket(E[k], d, layers, avg, lots, lp, pr);
+      if(layers == 0 || pr >= 0) continue;
+
+      bool deep = (InpRecLayers > 0 && layers >= InpRecLayers) ||
+                  (InpRecDDPct > 0 && E[k].basketStartEq > 0 && -pr / E[k].basketStartEq * 100.0 >= InpRecDDPct);
+      if(!deep) continue;
+      bool against = (MasterTrend() == -d) || E[k].dcaPaused;
+      if(!against) continue;
+
+      int h = (k < NT) ? k + NT : k - NT;                 // usi engine ka ulti side wala slot
+      if(!E[h].on || E[h].side != -d) continue;
+      int hd, hl; double ha, hlots, hlp, hpr;
+      GetBasket(E[h], hd, hl, ha, hlots, hlp, hpr);
+      if(hl > 0) continue;                                // hedge pehle se khula hai
+      if(TimeCurrent() - E[h].recLast < InpRecCooldownMin * 60) continue;
+      if(InpFridayStop && FridayLate(20)) continue;
+
+      double lot = NormLot(lots * InpRecRatio / 100.0);
+      if(lot <= 0) continue;
+      E[h].basketStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
+      if(Open(E[h], -d, lot, "H1"))
+        {
+         E[h].recLast = TimeCurrent();
+         E[h].basketsToday++;
+         PrintFormat("[%s] RECOVERY HEDGE: %s %d layers / P/L %.2f phansa, trend ulta -> %s %.2f lot",
+                     E[h].name, E[k].name, layers, pr, d == 1 ? "SELL" : "BUY", lot);
+         Tg(StringFormat("RECOVERY HEDGE [%s] %s %.2f lot (phansa: %s %d layers, P/L %+.2f)",
+                         E[h].name, d == 1 ? "SELL" : "BUY", lot, E[k].name, layers, pr));
+        }
      }
   }
