@@ -157,6 +157,6 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 
 ## v3.60 – Weekend protection + Margin/Lot limit + Telegram
 - **Friday:** 20:00 (server) ke baad basket profit me ho (ya `InpFriMaxLossUSD` tak loss) to close; naye DCA layers band. `InpFriForceClose` = 22:00 par sab band
-- **Limit:** `InpMaxAllLots` (saare baskets ka kul lot), `InpMinMarginLevel` 300% se kam par naya basket/layer nahi
+- **Limit:** `InpMaxAllLots` (saare baskets ka kul lot), `InpMinMarginLevel` 150% se kam par naya basket/layer nahi
 - **Telegram:** naya basket, DCA layer, basket close (P/L), net close, cutloss, daily loss, daily report.
   Setup: BotFather se token, @userinfobot se chat ID; MT5 Tools > Options > Expert Advisors > Allow WebRequest: `https://api.telegram.org`

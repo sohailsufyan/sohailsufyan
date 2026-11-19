@@ -46,5 +46,5 @@ InpFriMaxLossUSD=0
 InpFriNoDCA=true
 InpFriForceClose=false
 InpMaxAllLots=0
-InpMinMarginLevel=300
+InpMinMarginLevel=150
 InpTgOn=false

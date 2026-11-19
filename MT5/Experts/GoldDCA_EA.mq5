@@ -162,7 +162,7 @@ input int             InpFriForceHour     = 22;           // Force close ka serv
 
 input group "=== Margin / Lot Limit (sab baskets mila kar) ==="
 input double          InpMaxAllLots       = 0.0;          // Saare EA baskets ka kul lot isse zyada nahi (0 = off)
-input double          InpMinMarginLevel   = 300.0;        // Margin level % isse kam ho to naya basket / layer nahi (0 = off)
+input double          InpMinMarginLevel   = 150.0;        // Margin level % isse kam ho to naya basket / layer nahi (0 = off)
 
 input group "=== Telegram Alerts ==="
 input bool            InpTgOn             = false;        // Telegram alerts ON
