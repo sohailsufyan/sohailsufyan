@@ -190,3 +190,28 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Assistant v1.20: breakeven trigger **+$2**, SL average + **$0.20** (loss na ho); Inputs me nayi value di to purani panel value ki jagah wahi lagti hai
 - Assistant v1.21: breakeven trigger **+$1**, lock +$0.20, side ki sab positions par
 - Assistant v1.22: fix – breakeven ke baad nayi position judne par purana SL hata kar naye average se breakeven; panel me struct copy hataya (compile safe)
+
+---
+
+# Zerith_Gold_MultiZone_Breakout_EA (v1.10)
+
+- **Strategy:** 6 zones (A1–A3, B1–B3). Each zone has its own H1 swing-pivot settings and its own magic (base + 8/9/12/13/14/15).
+  Above the nearest confirmed swing high it places a Buy Stop, and below the nearest swing low a Sell Stop
+- **SL:** fixed 3000 = $30 | **TP:** per zone, scaled by the previous day's gold price | **BE/Trail:** 3-tier (lock, then fixed lock, then trailing)
+- **Units:** every "points" input is in **$0.01 (cents)**, on both 2-digit and 3-digit gold quotes
+- **Server time:** NFP calendar and Asia/London/Overlap/NY sessions are in UTC. Live, the offset is auto-detected; in the Strategy Tester,
+  set `InpServerGMTOffset` (winter offset) + `InpServerUsesUSDST` to match your broker (e.g. IC/Pepperstone = 2 + true, Exness = 0 + false)
+- **Zone time windows** (inside each zone) stay in server time, as in the original
+- **Daily DD:** measured from the day's peak equity (trailing), not the day-start balance. It resets if you restart the EA mid-day
+
+### v1.10 fixes (vs the original v1.00 paste)
+| Bug | Fix |
+|---|---|
+| A zone's Sell Stop blocked its Buy Stop (only one pending order was checked per magic) | Buy/Sell stops are tracked separately |
+| On a lot change, OrderModify was sent every tick (volume can't be modified) | Delete + re-place |
+| On 3-digit gold quotes every distance was 10x smaller | All distances in $0.01 units |
+| UTC NFP times were compared to server time (block ran 2–3 hours early) | UTC → server conversion |
+| Wrong NFP dates: July 4 holiday (2025, 2026), Nov 2027/2028 DST, 2025 shutdown delays | Corrected / added |
+| "Close All Trades before Weekend" never closed trades | Now closes positions + pending orders |
+| SL/TP inside the stop level, or TP already passed → error spam | Clamp; a passed TP closes the trade |
+| Pivot scan ran on every tick (6 zones × thousands of iHigh calls) | Cache per new H1 bar |
