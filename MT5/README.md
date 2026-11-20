@@ -177,3 +177,11 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Optional time exit: basket `InpSxMaxMinutes` se purana to +$0.2 par bahar (default off)
 - Intraday ke exit pehle jaise: +$3 / +$1 / $2 / +$5
 - v3.91: pehla order **6 lot**, har DCA layer par **+0.1 lot** (6.0, 6.1, 6.2 ...) – `InpFixedLot`, `InpLotAddLots`; max lot per layer 100
+
+# GoldDCA_Assistant – manual trade DCA helper (`Experts/GoldDCA_Assistant.mq5`)
+- Aap manually BUY/SELL kholo (magic 0); Assistant khud entry nahi leta
+- Price har **$5** against jaye to usi side ka naya layer (BUY/SELL alag, dono saath chal sakte)
+- Lot: pehle trade jaisa (ya fixed / +0.1 / multiplier)
+- Average se **+$3** jaate hi poori side ka **SL breakeven** (average price) par; **+$5** par close; backup +$2 → +$0.5
+- Net close (BUY + SELL mila kar profit), panel + Close BUY / Close SELL / Close ALL / Pause DCA buttons
+- Main GoldDCA_EA ke saath same symbol par chalana ho to us EA me `InpManageManual = false` rakhein
