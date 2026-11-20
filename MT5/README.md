@@ -198,3 +198,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Loss me auto-close nahi; **net close** BUY+SELL ≥ $5; **LOCK / UNLOCK** buttons
 - Margin guard: margin level < 300% ya free margin < 30% → naye trade/DCA band
 - Panel buttons: AUTO, MODE, LOCK, UNLOCK, Close BUY/SELL/ALL, TP / DCA / Lot / Max −/+
+- GoldHedgeScalper v1.10: **Lot AUTO** (capital ke hisaab se: har $1000 par 0.01, panel −/+ se $100 step) ya FIXED; panel button "LOT: AUTO/FIXED"

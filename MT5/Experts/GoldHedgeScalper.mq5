@@ -9,7 +9,7 @@
 //|  - LOCK / UNLOCK hedge buttons, margin guard                       |
 //+------------------------------------------------------------------+
 #property copyright "GoldHedgeScalper"
-#property version   "1.00"
+#property version   "1.10"
 
 #include <Trade/Trade.mqh>
 
@@ -23,7 +23,9 @@ input int             InpFastEMA          = 21;           // Fast EMA
 input int             InpSlowEMA          = 50;           // Slow EMA
 input bool            InpUseHTF           = true;         // Bada trend bhi same ho (H1 EMA50)
 input ENUM_TIMEFRAMES InpHTF              = PERIOD_H1;    // Bada trend TF
-input double          InpLot              = 0.01;         // Har trade ka lot
+input bool            InpAutoLot          = true;         // Lot capital ke hisaab se khud (AUTO)
+input double          InpBalancePer001    = 1000.0;       // AUTO: har itne $ balance par 0.01 lot
+input double          InpLot              = 0.01;         // FIXED: har trade ka lot
 input int             InpMaxPerSide       = 5;            // Ek side me max positions (DCA milake)
 input bool            InpSessionOnly      = true;         // Sirf London + New York
 input int             InpGMTOffset        = 2;            // Server time = GMT + ?
@@ -56,7 +58,8 @@ int      hF = INVALID_HANDLE, hS = INVALID_HANDLE, hH = INVALID_HANDLE;
 datetime lastBar = 0;
 bool     autoOn;
 int      mode;
-double   rtTP, rtDCA, rtLot;
+double   rtTP, rtDCA, rtLot, rtPer;
+bool     rtAuto;
 int      rtMax;
 #define  PFX "GHS_"
 
@@ -74,6 +77,7 @@ int OnInit()
    hH = iMA(_Symbol, InpHTF, 50, 0, MODE_EMA, PRICE_CLOSE);
    if(hF == INVALID_HANDLE || hS == INVALID_HANDLE || hH == INVALID_HANDLE) return(INIT_FAILED);
    autoOn = InpAutoOn; mode = InpMode; rtTP = InpTP; rtDCA = InpDCAStep; rtLot = InpLot; rtMax = InpMaxPerSide;
+   rtAuto = InpAutoLot; rtPer = InpBalancePer001;
    SB.be = false; SS.be = false; SB.beSL = 0; SS.beSL = 0;
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: Hedging account chahiye.");
@@ -156,6 +160,14 @@ int Trend()
    return t;
   }
 
+// Capital ke hisaab se lot (AUTO) ya fixed
+double CurLot()
+  {
+   if(!rtAuto) return CurLot();
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   return NormLot(0.01 * MathFloor(bal / MathMax(1.0, rtPer)));
+  }
+
 bool Open(int dir, double lot, string tag)
   {
    double px = dir == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -206,8 +218,8 @@ void OnTick()
    //--- DCA: side ki sabse kharab position se $X against
    if(InpDCA && roomOK)
      {
-      if(SB.n > 0 && SB.n < rtMax && !SB.be && ask <= SB.worst - rtDCA) Open(1, NormLot(rtLot), "DCA");
-      if(SS.n > 0 && SS.n < rtMax && !SS.be && bid >= SS.worst + rtDCA) Open(-1, NormLot(rtLot), "DCA");
+      if(SB.n > 0 && SB.n < rtMax && !SB.be && ask <= SB.worst - rtDCA) Open(1, CurLot(), "DCA");
+      if(SS.n > 0 && SS.n < rtMax && !SS.be && bid >= SS.worst + rtDCA) Open(-1, CurLot(), "DCA");
      }
 
    //--- Har naye candle par entry
@@ -220,8 +232,8 @@ void OnTick()
          int t = Trend();
          bool wantB = (mode == MODE_BOTH) || t == 1;
          bool wantS = (mode == MODE_BOTH) || t == -1;
-         if(wantB && SB.n < rtMax && !SB.be) Open(1, NormLot(rtLot), "AUTO");
-         if(wantS && SS.n < rtMax && !SS.be) Open(-1, NormLot(rtLot), "AUTO");
+         if(wantB && SB.n < rtMax && !SB.be) Open(1, CurLot(), "AUTO");
+         if(wantS && SS.n < rtMax && !SS.be) Open(-1, CurLot(), "AUTO");
         }
      }
    Panel();
@@ -335,13 +347,14 @@ void Panel()
    Bt("cb", 6 + bw + 4, y, bw, 22, "Close BUY", cB, cBg);
    Bt("cs", 6 + 2 * (bw + 4), y, bw, 22, "Close SELL", cS, clrWhite);
    y += 26;
-   Bt("ca", 6, y, W - 12, 22, "CLOSE ALL", cS, clrWhite);
+   Bt("ca", 6, y, (W - 16) / 2, 22, "CLOSE ALL", cS, clrWhite);
+   Bt("lotmode", 6 + (W - 16) / 2 + 4, y, (W - 16) / 2, 22, rtAuto ? "LOT: AUTO (capital)" : "LOT: FIXED", rtAuto ? cB : cLn, rtAuto ? cBg : cTx);
    y += 28;
    string lab[4];
    string ids[4] = {"tp", "dca", "lot", "max"};
    lab[0] = rtTP > 0 ? StringFormat("TP  +$%.1f (har trade)", rtTP) : "TP  OFF";
    lab[1] = StringFormat("DCA  $%.1f", rtDCA);
-   lab[2] = StringFormat("Lot  %.2f", rtLot);
+   lab[2] = rtAuto ? StringFormat("Lot AUTO %.2f  (0.01 / $%.0f)", CurLot(), rtPer) : StringFormat("Lot FIXED  %.2f", rtLot);
    lab[3] = StringFormat("Max per side  %d", rtMax);
    for(int r = 0; r < 4; r++)
      {
@@ -367,7 +380,12 @@ void OnChartEvent(const int id, const long &l, const double &d, const string &sp
    else if(b == "unlock") { CloseWhere(0, true); Print("UNLOCK: LOCK positions band"); }
    else if(b == "tpm" || b == "tpp") rtTP = MathMax(0.0, rtTP + (b == "tpp" ? 0.1 : -0.1));
    else if(b == "dcam" || b == "dcap") rtDCA = MathMax(0.5, rtDCA + (b == "dcap" ? 0.5 : -0.5));
-   else if(b == "lotm" || b == "lotp") rtLot = MathMax(SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), rtLot + (b == "lotp" ? 0.01 : -0.01));
+   else if(b == "lotmode") rtAuto = !rtAuto;
+   else if(b == "lotm" || b == "lotp")
+     {
+      if(rtAuto) rtPer = MathMax(100.0, rtPer + (b == "lotp" ? -100.0 : 100.0));   // + = zyada lot (kam $ per 0.01)
+      else rtLot = MathMax(SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), rtLot + (b == "lotp" ? 0.01 : -0.01));
+     }
    else if(b == "maxm" || b == "maxp") rtMax = MathMax(1, rtMax + (b == "maxp" ? 1 : -1));
    else
      {
