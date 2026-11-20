@@ -9,7 +9,7 @@
 //|  - Net close: dono side mila kar profit me = sab close           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_Assistant"
-#property version   "1.21"
+#property version   "1.22"
 
 #include <Trade/Trade.mqh>
 
@@ -154,6 +154,23 @@ void ReadSide(Side &s)
    if(s.count == 0) { ResetSide(s); s.lastLayer = ll; return; }
    s.trail = tr; s.trailSL = tsl; s.maxMove = mm; s.lastLayer = ll;
    if(s.count != c0) s.maxMove = 0;        // naya layer / position = naya average
+   if(s.count > c0 && c0 > 0 && s.trail)
+     {
+      // breakeven ke baad nayi position judi: purana SL naye average ke hisaab se galat hai -> hatao, dobara banega
+      s.trail = false; s.trailSL = 0;
+      ClearSideSL(s.dir);
+      PrintFormat("%s: nayi position judi, breakeven naye average se dobara lagega", s.dir == 1 ? "BUY" : "SELL");
+     }
+  }
+
+void ClearSideSL(int dir)
+  {
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || !Managed() || PosDir() != dir) continue;
+      if(PositionGetDouble(POSITION_SL) > 0) trade.PositionModify(t, 0, PositionGetDouble(POSITION_TP));
+     }
   }
 
 void CloseSide(Side &s, string why)
@@ -386,21 +403,20 @@ void DrawPanel()
    y = 44;
    for(int i = 0; i < 2; i++)
      {
-      Side s = S[i];
       string k = IntegerToString(i);
-      color sc = s.dir == 1 ? pBuy : pSell;
+      color sc = S[i].dir == 1 ? pBuy : pSell;
       R("c" + k, 6, y, W - 12, 46, pCard);
-      T("n" + k, 14, y + 4, s.dir == 1 ? "BUY SIDE" : "SELL SIDE", sc, 9, true);
-      if(s.count == 0)
+      T("n" + k, 14, y + 4, S[i].dir == 1 ? "BUY SIDE" : "SELL SIDE", sc, 9, true);
+      if(S[i].count == 0)
         {
          T("i" + k, 14, y + 24, "Koi trade nahi - manually kholo", pDim, 8);
          T("s" + k, 200, y + 4, "", pDim, 8);
         }
       else
         {
-         T("s" + k, 200, y + 4, StringFormat("P/L %+.2f", s.profit), s.profit >= 0 ? pBuy : pSell, 9, true);
-         string st = s.trail ? StringFormat("SL BREAKEVEN %.2f", s.trailSL) : StringFormat("next DCA %.2f (%s)", s.next, s.why == "" ? "ready" : s.why);
-         T("i" + k, 14, y + 24, StringFormat("%d pos | %.2f lot | avg %.2f | %s", s.count, s.lots, s.avg, st), pTxt, 8);
+         T("s" + k, 200, y + 4, StringFormat("P/L %+.2f", S[i].profit), S[i].profit >= 0 ? pBuy : pSell, 9, true);
+         string st = S[i].trail ? StringFormat("SL BREAKEVEN %.2f", S[i].trailSL) : StringFormat("next DCA %.2f (%s)", S[i].next, S[i].why == "" ? "ready" : S[i].why);
+         T("i" + k, 14, y + 24, StringFormat("%d pos | %.2f lot | avg %.2f | %s", S[i].count, S[i].lots, S[i].avg, st), pTxt, 8);
         }
       y += 50;
      }

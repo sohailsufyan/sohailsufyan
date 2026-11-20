@@ -189,3 +189,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Fix (EA v3.92 / Assistant v1.11): spread ab cents me ($0.01 = 1) – 3-digit broker (Exness) par spread filter galti se DCA/entry rok raha tha. Assistant lot default: aakhri trade jitna (LOT_SAME_AS_LAST)
 - Assistant v1.20: breakeven trigger **+$2**, SL average + **$0.20** (loss na ho); Inputs me nayi value di to purani panel value ki jagah wahi lagti hai
 - Assistant v1.21: breakeven trigger **+$1**, lock +$0.20, side ki sab positions par
+- Assistant v1.22: fix – breakeven ke baad nayi position judne par purana SL hata kar naye average se breakeven; panel me struct copy hataya (compile safe)
