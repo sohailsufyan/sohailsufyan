@@ -4,12 +4,12 @@
 //|  - Aap manually BUY/SELL kholo, EA khud trade NAHI kholta        |
 //|  - Price har $5 against jaye to usi side ka naya DCA layer       |
 //|  - BUY aur SELL side alag-alag basket (hedge bhi chalega)        |
-//|  - Exit: average se +$2 par SL breakeven (+$0.2), TP panel se    |
+//|  - Exit: average se +$1 par SL breakeven (+$0.2), TP panel se    |
 //|          backup: +$2 tak aakar +$0.5 par wapas = close           |
 //|  - Net close: dono side mila kar profit me = sab close           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_Assistant"
-#property version   "1.20"
+#property version   "1.21"
 
 #include <Trade/Trade.mqh>
 
@@ -33,7 +33,7 @@ input int             InpMinSecBetween    = 30;           // Do layers ke beech 
 input int             InpMaxSpread        = 60;           // Spread isse zyada (cents, 60 = $0.60) to DCA nahi
 
 input group "=== Exit (average price se $ doori) ==="
-input double          InpTrigger          = 2.0;          // Average se +$2 trade ki direction me jaate hi SL breakeven par
+input double          InpTrigger          = 1.0;          // Average se +$1 trade ki direction me jaate hi sab positions ka SL breakeven par
 input double          InpLock             = 0.2;          // Breakeven ke upar itna $ lock (commission/slippage cover, loss na ho)
 input bool            InpUseTrailing      = false;        // Breakeven ke baad SL price ke peeche chale (trailing)
 input double          InpTrailDist        = 2.0;          // Trailing doori (agar ON)
