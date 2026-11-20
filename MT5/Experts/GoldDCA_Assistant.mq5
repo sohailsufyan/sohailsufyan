@@ -4,12 +4,12 @@
 //|  - Aap manually BUY/SELL kholo, EA khud trade NAHI kholta        |
 //|  - Price har $5 against jaye to usi side ka naya DCA layer       |
 //|  - BUY aur SELL side alag-alag basket (hedge bhi chalega)        |
-//|  - Exit: average se +$3 par SL breakeven, +$5 par close,         |
+//|  - Exit: average se +$2 par SL breakeven (+$0.2), TP panel se    |
 //|          backup: +$2 tak aakar +$0.5 par wapas = close           |
 //|  - Net close: dono side mila kar profit me = sab close           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_Assistant"
-#property version   "1.11"
+#property version   "1.20"
 
 #include <Trade/Trade.mqh>
 
@@ -33,8 +33,8 @@ input int             InpMinSecBetween    = 30;           // Do layers ke beech 
 input int             InpMaxSpread        = 60;           // Spread isse zyada (cents, 60 = $0.60) to DCA nahi
 
 input group "=== Exit (average price se $ doori) ==="
-input double          InpTrigger          = 3.0;          // Average se +$3 jaate hi SL breakeven par
-input double          InpLock             = 0.0;          // Breakeven ke upar kitna lock (0 = theek average price)
+input double          InpTrigger          = 2.0;          // Average se +$2 trade ki direction me jaate hi SL breakeven par
+input double          InpLock             = 0.2;          // Breakeven ke upar itna $ lock (commission/slippage cover, loss na ho)
 input bool            InpUseTrailing      = false;        // Breakeven ke baad SL price ke peeche chale (trailing)
 input double          InpTrailDist        = 2.0;          // Trailing doori (agar ON)
 input double          InpTP               = 5.0;          // +$5 par poori side close (0 = TP off). Panel se badal sakte
@@ -78,10 +78,18 @@ int OnInit()
   {
    rtTP = InpTP; rtTrig = InpTrigger; rtStep = InpStepUSD;
    gvA = "GDA_" + _Symbol + "_" + IntegerToString(InpMagic) + "_";
+   // Panel se badli value yaad rehti hai - lekin agar Inputs me value badli gayi ho to nayi input lagti hai
    if(!MQLInfoInteger(MQL_TESTER) && GlobalVariableCheck(gvA + "tp"))
      {
-      rtTP = GlobalVariableGet(gvA + "tp"); rtTrig = GlobalVariableGet(gvA + "be");
-      rtStep = GlobalVariableGet(gvA + "dca"); dcaPaused = GlobalVariableGet(gvA + "pause") > 0.5;
+      if(GlobalVariableGet(gvA + "inTP") == InpTP)        rtTP   = GlobalVariableGet(gvA + "tp");
+      if(GlobalVariableGet(gvA + "inBE") == InpTrigger)   rtTrig = GlobalVariableGet(gvA + "be");
+      if(GlobalVariableGet(gvA + "inDCA") == InpStepUSD)  rtStep = GlobalVariableGet(gvA + "dca");
+      dcaPaused = GlobalVariableGet(gvA + "pause") > 0.5;
+     }
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      GlobalVariableSet(gvA + "inTP", InpTP); GlobalVariableSet(gvA + "inBE", InpTrigger); GlobalVariableSet(gvA + "inDCA", InpStepUSD);
+      GlobalVariableSet(gvA + "tp", rtTP); GlobalVariableSet(gvA + "be", rtTrig); GlobalVariableSet(gvA + "dca", rtStep);
      }
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(50);
