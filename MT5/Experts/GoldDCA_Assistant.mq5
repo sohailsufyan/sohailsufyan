@@ -9,11 +9,11 @@
 //|  - Net close: dono side mila kar profit me = sab close           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_Assistant"
-#property version   "1.10"
+#property version   "1.11"
 
 #include <Trade/Trade.mqh>
 
-enum ENUM_DCA_LOT { LOT_SAME_AS_FIRST = 0, LOT_FIXED_EACH = 1, LOT_ADD_EACH = 2, LOT_MULTIPLY = 3 };
+enum ENUM_DCA_LOT { LOT_SAME_AS_FIRST = 0, LOT_FIXED_EACH = 1, LOT_ADD_EACH = 2, LOT_MULTIPLY = 3, LOT_SAME_AS_LAST = 4 };
 
 input group "=== Kaunse trades manage karne hain ==="
 input bool            InpManageManual     = true;         // Manual trades (magic 0) manage karo
@@ -25,12 +25,12 @@ input double          InpStepUSD          = 5.0;          // Har $5 against par 
 input double          InpStepGrowth       = 1.0;          // Gap growth (1.0 = har baar $5)
 input int             InpMaxLayers        = 0;            // Max layers per side (0 = unlimited)
 input double          InpMaxSideLots      = 0.0;          // Ek side ka max kul lot (0 = off)
-input ENUM_DCA_LOT    InpLotMode          = LOT_SAME_AS_FIRST; // DCA lot kaise
+input ENUM_DCA_LOT    InpLotMode          = LOT_SAME_AS_LAST;  // DCA lot kaise (LAST = aakhri trade jitna)
 input double          InpFixedLot         = 0.10;         // LOT_FIXED_EACH: har layer ka lot
 input double          InpLotAdd           = 0.10;         // LOT_ADD_EACH: pehla lot + ye x layer (6.0, 6.1, 6.2..)
 input double          InpLotMult          = 1.2;          // LOT_MULTIPLY: pehla lot x ye^layer
 input int             InpMinSecBetween    = 30;           // Do layers ke beech min seconds
-input int             InpMaxSpread        = 60;           // Spread isse zyada (points) to DCA nahi
+input int             InpMaxSpread        = 60;           // Spread isse zyada (cents, 60 = $0.60) to DCA nahi
 
 input group "=== Exit (average price se $ doori) ==="
 input double          InpTrigger          = 3.0;          // Average se +$3 jaate hi SL breakeven par
@@ -61,7 +61,7 @@ struct Side
   {
    int      dir;          // 1 BUY, -1 SELL
    int      count;
-   double   lots, avg, lastPrice, firstLot, profit;
+   double   lots, avg, lastPrice, firstLot, lastLot, profit;
    bool     trail;
    double   trailSL, maxMove;
    datetime lastLayer;
@@ -109,7 +109,7 @@ void OnTimer() { DrawPanel(); }
 
 void ResetSide(Side &s)
   {
-   s.count = 0; s.lots = 0; s.avg = 0; s.lastPrice = 0; s.firstLot = 0; s.profit = 0;
+   s.count = 0; s.lots = 0; s.avg = 0; s.lastPrice = 0; s.firstLot = 0; s.lastLot = 0; s.profit = 0;
    s.trail = false; s.trailSL = 0; s.maxMove = 0; s.why = ""; s.next = 0;
   }
 
@@ -129,8 +129,8 @@ void ReadSide(Side &s)
   {
    bool tr = s.trail; double tsl = s.trailSL, mm = s.maxMove; datetime ll = s.lastLayer;
    int c0 = s.count;
-   s.count = 0; s.lots = 0; s.avg = 0; s.lastPrice = 0; s.firstLot = 0; s.profit = 0;
-   double pv = 0; datetime oldest = 0;
+   s.count = 0; s.lots = 0; s.avg = 0; s.lastPrice = 0; s.firstLot = 0; s.lastLot = 0; s.profit = 0;
+   double pv = 0; datetime oldest = 0, newest = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(PositionGetTicket(i) == 0 || !Managed() || PosDir() != s.dir) continue;
@@ -140,6 +140,7 @@ void ReadSide(Side &s)
       s.profit += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       if(s.lastPrice == 0 || (s.dir == 1 && p < s.lastPrice) || (s.dir == -1 && p > s.lastPrice)) s.lastPrice = p;
       if(oldest == 0 || t < oldest) { oldest = t; s.firstLot = v; }
+      if(newest == 0 || t >= newest) { newest = t; s.lastLot = v; }
      }
    if(s.lots > 0) s.avg = pv / s.lots;
    if(s.count == 0) { ResetSide(s); s.lastLayer = ll; return; }
@@ -185,6 +186,7 @@ double NextLot(Side &s)
       case LOT_FIXED_EACH: return NormLot(InpFixedLot);
       case LOT_ADD_EACH:   return NormLot(s.firstLot + InpLotAdd * n);
       case LOT_MULTIPLY:   return NormLot(s.firstLot * MathPow(InpLotMult, n));
+      case LOT_SAME_AS_LAST: return NormLot(s.lastLot);
       default:             return NormLot(s.firstLot);
      }
   }
@@ -236,7 +238,8 @@ void ManageSide(Side &s)
    if(InpMaxLayers > 0 && s.count >= InpMaxLayers) { s.why = "max layers"; return; }
    double lot = NextLot(s);
    if(InpMaxSideLots > 0 && s.lots + lot > InpMaxSideLots + 1e-9) { s.why = "max lots"; return; }
-   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > InpMaxSpread) { s.why = "spread"; return; }
+   double spc = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / 0.01;
+   if(spc > InpMaxSpread) { s.why = StringFormat("spread %.0f", spc); return; }
    bool add = (s.dir == 1) ? (ask <= s.next) : (bid >= s.next);
    if(!add) { s.why = StringFormat("waiting $%.0f", step); return; }
    if(TimeCurrent() - s.lastLayer < InpMinSecBetween) { s.why = "gap sec"; return; }

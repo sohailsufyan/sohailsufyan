@@ -10,7 +10,7 @@
 //|  hai. Basket hard stop OFF mat karein.                           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_EA"
-#property version   "3.91"
+#property version   "3.92"
 
 #include <Trade/Trade.mqh>
 
@@ -809,8 +809,8 @@ void ManageBasket(Engine &e, int dir, int layers, double avg, double lastPrice, 
       if(dir == -1 && bid < vwap + band) { e.dcaWhy = "VWAP band"; return; }
      }
    if(InpUseNews && InpNewsNoDCA && newsActive) { e.dcaWhy = "news"; return; }
-   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > e.maxSpread)
-     { e.dcaWhy = StringFormat("spread %d > %d", (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), e.maxSpread); return; }
+   if(SpreadCents() > e.maxSpread)
+     { e.dcaWhy = StringFormat("spread %.0f > %d", SpreadCents(), e.maxSpread); return; }
    if(InpAddOnlyInTrend && TrendDir(e.hTF, e.hTS, e.trendTF) != dir) { e.dcaWhy = "trend against"; return; }
    bool rev = InpPauseOnReversal && ReversalAgainst(dir);
    if(rev != e.dcaPaused)
@@ -1235,7 +1235,7 @@ void TryNewBasket(Engine &e, int k)
    if(e.basketsToday >= e.maxBaskets) return;
    if(TimeCurrent() - e.lastCloseTime < e.cooldownSec) return;
    if(InpUseNews && (newsActive || newsSoon)) return;
-   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > e.maxSpread) return;
+   if(SpreadCents() > e.maxSpread) return;
    if(InpUseSession && (dt.hour < InpSessionStart || dt.hour >= InpSessionEnd)) return;
    if(InpFridayStop && dt.day_of_week == 5 && dt.hour >= 20) return;
 
@@ -1711,7 +1711,7 @@ void ShowTextPanel()
                               sd == 1 ? "BUY" : "SELL", lastScan.total, Tier(lastScan.total), InpMinScore, ScoreText(lastScan));
      }
    Comment(StringFormat(
-      "GoldDCA_EA v3.91 | %s\n"
+      "GoldDCA_EA v3.92 | %s\n"
       "Status    : %s\n"
       "Master %s : %s\n"
       "News      : %s\n"
@@ -1862,7 +1862,7 @@ void ShowPanel()
                    (InpDailyTargetPct > 0 && DayPLPct() >= InpDailyTargetPct ? "TARGET HIT" : "RUNNING"));
    color stC = status == "RUNNING" ? cBuy : (status == "TARGET HIT" ? cAcc : cWarn);
    PText("title", 12, 8, "GOLD DCA  SIGNAL PANEL", cTxt, 11, true);
-   PText("ver", 12, 27, _Symbol + "  |  v3.91  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
+   PText("ver", 12, 27, _Symbol + "  |  v3.92  |  " + TimeToString(TimeCurrent(), TIME_MINUTES) + " server", cDim, 8);
    PRect("badge", W - 96, 10, 84, 20, stC, stC);
    PText("badgeT", W - 54, 13, status, cBg, 8, true, ANCHOR_UPPER);
    y = 48;
@@ -2491,4 +2491,10 @@ bool LondonOrNY()
    MqlDateTime g;
    TimeToStruct(TimeCurrent() - InpServerGMTOffset * 3600, g);
    return g.hour >= 7 && g.hour < 21;     // London 07-16 GMT, New York 12-21 GMT
+  }
+
+// Spread "cents" me (0.01$ = 1). 2-digit aur 3-digit (Exness 3552.564) dono broker par same matlab.
+double SpreadCents()
+  {
+   return (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / 0.01;
   }

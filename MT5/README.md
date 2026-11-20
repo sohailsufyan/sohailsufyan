@@ -186,3 +186,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Net close (BUY + SELL mila kar profit), panel + Close BUY / Close SELL / Close ALL / Pause DCA buttons
 - Main GoldDCA_EA ke saath same symbol par chalana ho to us EA me `InpManageManual = false` rakhein
 - Assistant v1.10: panel par **TP − / +** ($0.5 step, 0 = TP OFF), **Breakeven − / +**, **DCA − / +** buttons; restart ke baad yaad
+- Fix (EA v3.92 / Assistant v1.11): spread ab cents me ($0.01 = 1) – 3-digit broker (Exness) par spread filter galti se DCA/entry rok raha tha. Assistant lot default: aakhri trade jitna (LOT_SAME_AS_LAST)
