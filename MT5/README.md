@@ -190,3 +190,33 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Assistant v1.20: breakeven trigger **+$2**, SL average + **$0.20** (loss na ho); Inputs me nayi value di to purani panel value ki jagah wahi lagti hai
 - Assistant v1.21: breakeven trigger **+$1**, lock +$0.20, side ki sab positions par
 - Assistant v1.22: fix – breakeven ke baad nayi position judne par purana SL hata kar naye average se breakeven; panel me struct copy hataya (compile safe)
+
+# GoldICT_Scalper – ICT Silver Bullet scalper (`Experts/GoldICT_Scalper.mq5`)
+BAKOME "Ultimate ICT Gold Scalper" ka idea, poora naya code. Original mein FVG/Order Block/sweep sirf
+calculate hote the, trade decision mein use nahi hote the, aur lot size 100x+ galat tha.
+
+**Setup (XAUUSD M5, har closed candle par, sirf Kill Zone ke andar)**
+1. **Bias:** price H4 EMA200 ke upar = sirf BUY, neeche = sirf SELL (optional H1 EMA34 filter)
+2. **Liquidity sweep:** pichhle `InpSweepBars` candles ne purane range (`InpLiquidityLookback`) ka low (BUY) / high (SELL) toda, phir price wapas andar close hua
+3. **Displacement + FVG:** strong candle (body ≥ 0.8 ATR) aur 3-candle Fair Value Gap (≥ 0.3 ATR)
+4. **Entry:** price wapas FVG mein aaye to market order; setup 6 candle ya Kill Zone khatam hone par cancel
+5. **SL:** sweep ke extreme ke peeche (ya `InpSLMode = Order Block` = tighter), **TP:** 2R
+6. **Lot:** equity ka `InpRiskPercent` (1%) risk – SL distance se calculate; min lot se zyada risk ho to trade skip
+
+**Kill Zones (broker time, zyadatar GMT+2/+3 brokers par New York + 7 ghante)**
+| Window | New York | Broker (default) |
+|---|---|---|
+| London Silver Bullet | 03–04 | 10–11 |
+| NY AM Silver Bullet | 10–11 | 17–18 |
+| NY PM Silver Bullet (default off) | 14–15 | 21–22 |
+Apne broker ka time check karke `InpKZx_Start/End` badlein.
+
+**Risk / management**
+- Daily loss 5% / daily profit 8% ke baad naya trade nahi; max 6 trades/din, 1 trade per window, max 2 positions
+- Spread aur ATR filter **$ mein** (`InpMaxSpreadUSD = 0.50`, `InpMinATR_USD = 1.0`) – 2-digit aur 3-digit (Exness) dono par sahi
+- +1R par 50% partial close, +1R par breakeven (+0.05R lock), +1.5R se 1×ATR trailing
+- Din ka start equity / trade count EA restart ke baad bhi yaad rehta hai
+- Chart par status panel (Kill Zone, setup, positions, day P/L, spread)
+
+> Backtest nahi hua hai – yeh naya EA hai. Pehle Strategy Tester (Every tick based on real ticks,
+> XAUUSD M5, kam se kam 6 mahine) phir demo. MetaEditor mein F7 se compile karke check karein.
