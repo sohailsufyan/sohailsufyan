@@ -9,7 +9,7 @@
 //|  - Net close: dono side mila kar profit me = sab close           |
 //+------------------------------------------------------------------+
 #property copyright "GoldDCA_Assistant"
-#property version   "1.00"
+#property version   "1.10"
 
 #include <Trade/Trade.mqh>
 
@@ -37,7 +37,7 @@ input double          InpTrigger          = 3.0;          // Average se +$3 jaat
 input double          InpLock             = 0.0;          // Breakeven ke upar kitna lock (0 = theek average price)
 input bool            InpUseTrailing      = false;        // Breakeven ke baad SL price ke peeche chale (trailing)
 input double          InpTrailDist        = 2.0;          // Trailing doori (agar ON)
-input double          InpTP               = 5.0;          // +$5 par poori side close
+input double          InpTP               = 5.0;          // +$5 par poori side close (0 = TP off). Panel se badal sakte
 input bool            InpBackup           = true;         // Backup exit ON
 input double          InpBackupArm        = 2.0;          // +$2 tak aaye...
 input double          InpBackupExit       = 0.5;          // ...phir +$0.5 par wapas aaye to close
@@ -70,10 +70,19 @@ struct Side
   };
 Side     S[2];
 bool     dcaPaused = false;
+double   rtTP = 0, rtTrig = 0, rtStep = 0;     // panel buttons se badalne wale values
+string   gvA = "";
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   rtTP = InpTP; rtTrig = InpTrigger; rtStep = InpStepUSD;
+   gvA = "GDA_" + _Symbol + "_" + IntegerToString(InpMagic) + "_";
+   if(!MQLInfoInteger(MQL_TESTER) && GlobalVariableCheck(gvA + "tp"))
+     {
+      rtTP = GlobalVariableGet(gvA + "tp"); rtTrig = GlobalVariableGet(gvA + "be");
+      rtStep = GlobalVariableGet(gvA + "dca"); dcaPaused = GlobalVariableGet(gvA + "pause") > 0.5;
+     }
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(50);
    trade.SetTypeFillingBySymbol(_Symbol);
@@ -85,7 +94,7 @@ int OnInit()
      }
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: Hedging account chahiye - netting par BUY/SELL aapas me cut ho jayenge.");
-   PrintFormat("DCA Assistant ready: har $%.1f against par layer. Manually trade kholo.", InpStepUSD);
+   PrintFormat("DCA Assistant ready: har $%.1f against par layer. Manually trade kholo.", rtStep);
    EventSetTimer(1);
    return(INIT_SUCCEEDED);
   }
@@ -201,12 +210,12 @@ void ManageSide(Side &s)
    if(InpHardStopUSD > 0 && s.profit <= -InpHardStopUSD) { CloseSide(s, "hard stop"); return; }
    if(InpBackup && !s.trail && s.maxMove >= InpBackupArm && move <= InpBackupExit && s.profit > 0)
      { CloseSide(s, "backup"); return; }
-   if(move >= InpTP && s.profit > 0) { CloseSide(s, "TP"); return; }
-   if(!s.trail && move >= InpTrigger)
+   if(rtTP > 0 && move >= rtTP && s.profit > 0) { CloseSide(s, "TP"); return; }
+   if(!s.trail && move >= rtTrig)
      {
       s.trail = true;
       s.trailSL = s.avg + s.dir * InpLock;
-      PrintFormat("%s: +$%.1f aaya, SL breakeven%s par (%.2f)", s.dir == 1 ? "BUY" : "SELL", InpTrigger,
+      PrintFormat("%s: +$%.1f aaya, SL breakeven%s par (%.2f)", s.dir == 1 ? "BUY" : "SELL", rtTrig,
                   InpLock > 0 ? StringFormat(" +$%.1f", InpLock) : "", s.trailSL);
      }
    if(s.trail)
@@ -220,7 +229,7 @@ void ManageSide(Side &s)
    if(InpBrokerSLTP) SyncSLTP(s);
 
    //--- DCA
-   double step = InpStepUSD * MathPow(InpStepGrowth, MathMax(0, s.count - 1));
+   double step = rtStep * MathPow(InpStepGrowth, MathMax(0, s.count - 1));
    s.next = s.lastPrice - s.dir * step;
    if(dcaPaused) { s.why = "PAUSED"; return; }
    if(s.trail)   { s.why = "breakeven"; return; }
@@ -258,9 +267,9 @@ void SyncSLTP(Side &s)
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double px = (s.dir == 1) ? bid : ask;
 
-   double tp = NormalizeDouble(s.avg + s.dir * InpTP, digits);
+   double tp = rtTP > 0 ? NormalizeDouble(s.avg + s.dir * rtTP, digits) : 0;
    double sl = s.trail ? NormalizeDouble(s.trailSL, digits) : 0;
-   bool tpOK = (s.dir == 1) ? (tp - ask >= minStop) : (bid - tp >= minStop);
+   bool tpOK = tp > 0 && ((s.dir == 1) ? (tp - ask >= minStop) : (bid - tp >= minStop));
    bool slOK = sl > 0 && ((s.dir == 1) ? (bid - sl >= minStop) : (sl - ask >= minStop));
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -269,7 +278,7 @@ void SyncSLTP(Side &s)
       if(t == 0 || !Managed() || PosDir() != s.dir) continue;
       double cSL = PositionGetDouble(POSITION_SL), cTP = PositionGetDouble(POSITION_TP);
       if((cSL > 0 && MathAbs(px - cSL) <= freeze) || (cTP > 0 && MathAbs(px - cTP) <= freeze)) continue;
-      double nSL = slOK ? sl : cSL, nTP = tpOK ? tp : cTP;
+      double nSL = slOK ? sl : cSL, nTP = tpOK ? tp : (rtTP <= 0 ? 0 : cTP);   // TP off = TP hata do
       if(MathAbs(cSL - nSL) < 20 * _Point && MathAbs(cTP - nTP) < 20 * _Point) continue;
       trade.PositionModify(t, nSL, nTP);
      }
@@ -361,7 +370,8 @@ void DrawPanel()
    int W = 330, y = 0;
    R("bg", 0, 0, W, 200, pBg);
    T("title", 10, 6, "DCA ASSISTANT  (manual trades)", pTxt, 10, true);
-   T("sub", 10, 24, StringFormat("Har $%.0f against par layer  |  +$%.0f par SL breakeven  |  TP +$%.0f", InpStepUSD, InpTrigger, InpTP), pDim, 8);
+   T("sub", 10, 24, StringFormat("DCA har $%.1f  |  +$%.1f par SL breakeven  |  %s", rtStep, rtTrig,
+                                 rtTP > 0 ? StringFormat("TP +$%.1f", rtTP) : "TP OFF"), pDim, 8);
    y = 44;
    for(int i = 0; i < 2; i++)
      {
@@ -393,6 +403,19 @@ void DrawPanel()
    y += 26;
    B("btn_p", 6, y, W - 12, 22, dcaPaused ? "RESUME DCA" : "PAUSE DCA", dcaPaused ? pWarn : pLine, dcaPaused ? pBg : pTxt);
    y += 28;
+   // TP / Breakeven / DCA setting buttons
+   string lab[3]; string ids[3] = {"tp", "be", "dca"};
+   lab[0] = rtTP > 0 ? StringFormat("TP  +$%.1f", rtTP) : "TP  OFF";
+   lab[1] = StringFormat("Breakeven  +$%.1f", rtTrig);
+   lab[2] = StringFormat("DCA  $%.1f", rtStep);
+   for(int r = 0; r < 3; r++)
+     {
+      R("row" + IntegerToString(r), 6, y, W - 12, 24, pCard);
+      B("btn_" + ids[r] + "m", 10, y + 2, 34, 20, "-", pLine, pTxt);
+      T("lab" + IntegerToString(r), 54, y + 5, lab[r], (r == 0 && rtTP <= 0) ? pWarn : pTxt, 9, true);
+      B("btn_" + ids[r] + "p", W - 48, y + 2, 34, 20, "+", pLine, pTxt);
+      y += 28;
+     }
    ObjectSetInteger(0, APFX + "bg", OBJPROP_YSIZE, y);
    ChartRedraw();
   }
@@ -403,6 +426,21 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
    string b = StringSubstr(sparam, StringLen(APFX + "btn_"));
    if(b == "p") { dcaPaused = !dcaPaused; Print(dcaPaused ? "DCA PAUSED" : "DCA RESUMED"); }
+   else if(b == "tpm" || b == "tpp")
+     {
+      rtTP = MathMax(0.0, MathMin(100.0, rtTP + (b == "tpp" ? 0.5 : -0.5)));
+      PrintFormat("TP ab %s", rtTP > 0 ? StringFormat("+$%.1f", rtTP) : "OFF");
+     }
+   else if(b == "bem" || b == "bep")
+     {
+      rtTrig = MathMax(0.5, MathMin(100.0, rtTrig + (b == "bep" ? 0.5 : -0.5)));
+      PrintFormat("Breakeven trigger ab +$%.1f", rtTrig);
+     }
+   else if(b == "dcam" || b == "dcap")
+     {
+      rtStep = MathMax(1.0, MathMin(100.0, rtStep + (b == "dcap" ? 1.0 : -1.0)));
+      PrintFormat("DCA gap ab $%.1f", rtStep);
+     }
    else
      {
       string what = b == "cb" ? "BUY side" : (b == "cs" ? "SELL side" : "BUY + SELL dono");
@@ -412,6 +450,11 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          if(b == "cb" || b == "ca") CloseSide(S[0], "button");
          if(b == "cs" || b == "ca") CloseSide(S[1], "button");
         }
+     }
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      GlobalVariableSet(gvA + "tp", rtTP); GlobalVariableSet(gvA + "be", rtTrig);
+      GlobalVariableSet(gvA + "dca", rtStep); GlobalVariableSet(gvA + "pause", dcaPaused ? 1 : 0);
      }
    lastDraw = 0;
    DrawPanel();
