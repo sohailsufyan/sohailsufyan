@@ -190,3 +190,11 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Assistant v1.20: breakeven trigger **+$2**, SL average + **$0.20** (loss na ho); Inputs me nayi value di to purani panel value ki jagah wahi lagti hai
 - Assistant v1.21: breakeven trigger **+$1**, lock +$0.20, side ki sab positions par
 - Assistant v1.22: fix – breakeven ke baad nayi position judne par purana SL hata kar naye average se breakeven; panel me struct copy hataya (compile safe)
+
+# GoldHedgeScalper (`Experts/GoldHedgeScalper.mq5`) – M1 hedge scalper
+- Har naye M1 candle par entry: **TREND** mode (EMA 21/50 + H1 EMA50) ya **BOTH** mode (BUY + SELL dono)
+- Har position ka apna **TP +$1** (turant profit), side me 2+ positions aur +$1 move → sab ka SL **average + $0.20**
+- **$3 DCA** (side ki sabse kharab position se), max 5 per side
+- Loss me auto-close nahi; **net close** BUY+SELL ≥ $5; **LOCK / UNLOCK** buttons
+- Margin guard: margin level < 300% ya free margin < 30% → naye trade/DCA band
+- Panel buttons: AUTO, MODE, LOCK, UNLOCK, Close BUY/SELL/ALL, TP / DCA / Lot / Max −/+
