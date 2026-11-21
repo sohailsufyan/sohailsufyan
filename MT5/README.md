@@ -199,3 +199,7 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Margin guard: margin level < 300% ya free margin < 30% → naye trade/DCA band
 - Panel buttons: AUTO, MODE, LOCK, UNLOCK, Close BUY/SELL/ALL, TP / DCA / Lot / Max −/+
 - GoldHedgeScalper v1.10: **Lot AUTO** (capital ke hisaab se: har $1000 par 0.01, panel −/+ se $100 step) ya FIXED; panel button "LOT: AUTO/FIXED"
+
+# BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
+- TP +$30 har trade, DCA $150, breakeven +$30 → average + $5, max spread $30, session filter OFF (24/7), magic 777666
+- Panel steps: TP ±$5, DCA ±$25; lot AUTO (0.01 / $1000) ya FIXED
