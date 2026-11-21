@@ -1,0 +1,26 @@
+; GoldHedgeScalper - Gold_1_Safe (Vantage)
+InpAutoOn=true
+InpSigTF=1
+InpFastEMA=21
+InpSlowEMA=50
+InpUseHTF=true
+InpHTF=16385
+InpGMTOffset=2
+InpNetClose=true
+InpNetCloseUSD=5.0
+InpDCA=true
+InpManageManual=false
+InpMode=0
+InpAutoLot=true
+InpBalancePer001=2000
+InpLot=0.01
+InpMaxPerSide=3
+InpSessionOnly=true
+InpMaxSpread=60
+InpTP=1.0
+InpBETrigger=1.0
+InpBELock=0.2
+InpDCAStep=4.0
+InpMinMarginLevel=500
+InpMinFreeMarginPct=50
+InpMagic=777555

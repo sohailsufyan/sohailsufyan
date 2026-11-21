@@ -1,0 +1,26 @@
+; BTCHedgeScalper - BTC_2_Normal (Vantage)
+InpAutoOn=true
+InpSigTF=1
+InpFastEMA=21
+InpSlowEMA=50
+InpUseHTF=true
+InpHTF=16385
+InpGMTOffset=2
+InpNetClose=true
+InpNetCloseUSD=5.0
+InpDCA=true
+InpManageManual=false
+InpMode=0
+InpAutoLot=true
+InpBalancePer001=1000
+InpLot=0.01
+InpMaxPerSide=5
+InpSessionOnly=false
+InpMaxSpread=5000
+InpTP=30.0
+InpBETrigger=30.0
+InpBELock=5.0
+InpDCAStep=150.0
+InpMinMarginLevel=300
+InpMinFreeMarginPct=30
+InpMagic=777666

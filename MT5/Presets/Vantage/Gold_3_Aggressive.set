@@ -1,0 +1,26 @@
+; GoldHedgeScalper - Gold_3_Aggressive (Vantage)
+InpAutoOn=true
+InpSigTF=1
+InpFastEMA=21
+InpSlowEMA=50
+InpUseHTF=true
+InpHTF=16385
+InpGMTOffset=2
+InpNetClose=true
+InpNetCloseUSD=5.0
+InpDCA=true
+InpManageManual=false
+InpMode=0
+InpAutoLot=true
+InpBalancePer001=500
+InpLot=0.01
+InpMaxPerSide=8
+InpSessionOnly=false
+InpMaxSpread=60
+InpTP=0.8
+InpBETrigger=0.8
+InpBELock=0.2
+InpDCAStep=2.5
+InpMinMarginLevel=200
+InpMinFreeMarginPct=20
+InpMagic=777555

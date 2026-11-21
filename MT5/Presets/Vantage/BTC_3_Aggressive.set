@@ -1,0 +1,26 @@
+; BTCHedgeScalper - BTC_3_Aggressive (Vantage)
+InpAutoOn=true
+InpSigTF=1
+InpFastEMA=21
+InpSlowEMA=50
+InpUseHTF=true
+InpHTF=16385
+InpGMTOffset=2
+InpNetClose=true
+InpNetCloseUSD=5.0
+InpDCA=true
+InpManageManual=false
+InpMode=0
+InpAutoLot=true
+InpBalancePer001=500
+InpLot=0.01
+InpMaxPerSide=8
+InpSessionOnly=false
+InpMaxSpread=5000
+InpTP=25.0
+InpBETrigger=25.0
+InpBELock=5.0
+InpDCAStep=120.0
+InpMinMarginLevel=200
+InpMinFreeMarginPct=20
+InpMagic=777666
