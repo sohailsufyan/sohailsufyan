@@ -253,7 +253,7 @@ void ManageStops(int dir, SideInfo &s, double bid, double ask)
       s.beSL = NormalizeDouble(s.avg + dir * InpBELock, dg);
       PrintFormat("%s side: +$%.1f, sab positions ka SL breakeven %.2f", dir == 1 ? "BUY" : "SELL", InpBETrigger, s.beSL);
      }
-   if(s.be && ((dir == 1 && bid <= s.beSL) || (dir == -1 && ask >= s.beSL)))
+   if(s.be && s.profit > 0 && ((dir == 1 && bid <= s.beSL) || (dir == -1 && ask >= s.beSL)))   // side ka total profit me ho tabhi
      {
       PrintFormat("%s side breakeven close", dir == 1 ? "BUY" : "SELL");
       CloseWhere(dir, false);
