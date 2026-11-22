@@ -199,7 +199,16 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Margin guard: margin level < 300% ya free margin < 30% → naye trade/DCA band
 - Panel buttons: AUTO, MODE, LOCK, UNLOCK, Close BUY/SELL/ALL, TP / DCA / Lot / Max −/+
 - GoldHedgeScalper v1.10: **Lot AUTO** (capital ke hisaab se: har $1000 par 0.01, panel −/+ se $100 step) ya FIXED; panel button "LOT: AUTO/FIXED"
+- **v1.20 (Gold + BTC dono):**
+  - **Pair Close:** phansa trade (1 DCA step against) + 1–3 sabse profit wale trades, total ≥ +$0.20 tabhi saath band
+  - **Recovery Hedge:** side me 3+ positions (ya loss ≥ 3% balance) + trend ulta → ulti side 50% lot ka HEDGE (panel −/+ 10%, max 100%, ek side ka ek hi hedge, lot kabhi double nahi). Hedge ke time us side ka DCA/entry/TP ruka; side + hedge total ≥ +$1 → dono band; trend wapas + hedge profit me → sirf hedge band
+  - **Auto LOCK:** margin level < 200% ya USD high-impact news (±15 min) → net lot 0. News se pehle sab profit me ho to lock ki jagah sab band. LOCK ke time sab freeze (TP hata, DCA/entry/pair band)
+  - **Smart UNLOCK:** LOCK (+ zarurat ho to original side ke profit wale trades) ka total ≥ +$0.20 tabhi; auto unlock 15 min baad, trend wapas aaye / news khatam, aur unlock ke baad margin ≥ 250%. Manual LOCK = manual UNLOCK (loss me ho to confirm poochega)
+  - **Har group close total profit me:** breakeven, pair, hedge group, unlock, net close
+  - **Manual trades:** apna TP/SL waisa hi rahe (TP nahi hai to panel TP lagega), breakeven SL sirf profit ki taraf; pehle se khule trades bhi manage
+  - Panel: HEDGE / PAIR / A-LOCK ON-OFF buttons, Hedge % −/+, hedge aur lock status line
+  - Fix: FIXED lot mode me CurLot() khud ko call karta tha (recursion) – theek kiya
 
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
-- TP +$30 har trade, DCA $150, breakeven +$30 → average + $5, max spread $30, session filter OFF (24/7), magic 777666
+- TP +$30 har trade, DCA $150, breakeven +$30 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
 - Panel steps: TP ±$5, DCA ±$25; lot AUTO (0.01 / $1000) ya FIXED

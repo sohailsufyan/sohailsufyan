@@ -17,3 +17,5 @@ Load: EA chart par lagao → Inputs → **Load** → set file → OK. Pehle demo
 
 Sab sets: M1, EMA 21/50 + H1 trend, breakeven (2+ positions), net close $5, Gold spread max $0.60, BTC $50, GMT+2.
 Gold sets → GoldHedgeScalper (XAUUSD chart). BTC sets → BTCHedgeScalper (BTCUSD chart).
+
+**v1.20 (sab sets me):** Pair Close ON ($0.20+), Recovery Hedge 50% (max 100%, ek side ka ek hedge), Auto LOCK (margin 200% / Safe+Small 300% / Aggressive 150%, USD high-impact news ±15 min), manual trade ka apna SL/TP waisa hi rahe. BTC breakeven lock +$20.
