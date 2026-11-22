@@ -210,5 +210,5 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
   - Fix: FIXED lot mode me CurLot() khud ko call karta tha (recursion) – theek kiya
 
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
-- TP +$30 har trade, DCA $150, breakeven +$30 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
+- TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
 - Panel steps: TP ±$5, DCA ±$25; lot AUTO (0.01 / $1000) ya FIXED

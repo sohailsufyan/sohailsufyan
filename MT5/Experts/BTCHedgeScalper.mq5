@@ -4,7 +4,7 @@
 //|  - Har naye M1 candle par EMA trend ki direction me trade         |
 //|    (ya BOTH mode: BUY + SELL dono)                                |
 //|  - Har position ka apna TP (+$30), $150 against par DCA           |
-//|  - Side +$30 chale to SL breakeven +$20                           |
+//|  - Side +$40 chale to SL breakeven +$20                           |
 //|  - Pair Close: phansa trade + profit wale trades saath band       |
 //|  - Recovery Hedge: side phanse + trend ulta = 50% hedge (max 100%)|
 //|  - Auto LOCK: margin kam ya badi news = net lot 0                 |
@@ -36,7 +36,7 @@ input int             InpMaxSpread        = 3000;         // Max spread (cents, 
 
 input group "=== Exit (turant profit) ==="
 input double          InpTP               = 30.0;         // Har position ka TP: entry se +$30
-input double          InpBETrigger        = 30.0;         // Side average se +$30 par sab positions ka SL breakeven
+input double          InpBETrigger        = 40.0;         // Side average se +$40 par sab positions ka SL breakeven
 input double          InpBELock           = 20.0;         // Breakeven = average + $20 (loss na ho)
 input bool            InpNetClose         = true;         // Sab trades ka total profit me = sab close
 input double          InpNetCloseUSD      = 5.0;          // Net kam se kam $
