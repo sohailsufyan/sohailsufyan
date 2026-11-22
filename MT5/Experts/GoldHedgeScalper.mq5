@@ -1,19 +1,20 @@
 //+------------------------------------------------------------------+
 //|                                           GoldHedgeScalper.mq5   |
-//|  XAUUSD M1 hedge scalper  v1.21                                   |
+//|  XAUUSD M1 hedge scalper  v1.22                                   |
 //|  - Har naye M1 candle par EMA trend ki direction me trade         |
 //|    (ya BOTH mode: BUY + SELL dono)                                |
 //|  - Har position ka apna chhota TP (+$1), $3 against par DCA       |
 //|  - Side +$1.5 chale to SL breakeven +$0.50                        |
 //|  - Pair Close: phansa trade + profit wale trades saath band       |
 //|  - Recovery Hedge: side phanse + M1 trend ulta (ya loss 5%+)      |
-//|    = 50% hedge (max 100%), hedge ka profit lock                    |
+//|    = 50% hedge (max 100%), do step me (25% + 25%), profit lock,    |
+//|    price wapas aaye to hedge dheere-dheere chhota (total plus me)   |
 //|  - Auto LOCK: margin kam ya badi news = net lot 0                 |
 //|  - Har group close sirf total profit me                           |
 //|  - Manual trade ka apna SL/TP waisa hi rahe                       |
 //+------------------------------------------------------------------+
 #property copyright "GoldHedgeScalper"
-#property version   "1.21"
+#property version   "1.22"
 
 #include <Trade/Trade.mqh>
 
@@ -61,6 +62,8 @@ input double          InpHedgeCloseUSD    = 1.0;          // Side + hedge total 
 input int             InpHedgeCoolMin     = 15;           // Hedge band hone ke baad itne min naya hedge nahi
 input bool            InpHedgeFastTrend   = true;         // Hedge ke liye sirf M1 trend dekho (H1 ka intezaar nahi)
 input double          InpRecHardPct       = 5.0;          // Side ka loss balance ka itna % = hedge (M1 side ke favour me na ho) (0 = off)
+input bool            InpHedgeSteps       = true;         // Step hedge: pehle aadha, price 1 DCA step aur gire to baaki
+input bool            InpHedgeReduce      = true;         // Smart hedge kam: profit wala trade + hedge ka hissa saath band (total plus)
 
 input group "=== Auto LOCK ==="
 input bool            InpAutoLock         = true;         // Auto LOCK ON
@@ -435,6 +438,39 @@ void OrphanHedgeTP(int hd)
      }
   }
 
+// Price wapas side ke favour me: side ka sabse profit wala trade + hedge ka utna hissa jitna wo cover kare (total >= min)
+bool HedgeReduce(int dir, Grp &h)
+  {
+   if(!InpHedgeReduce || h.n == 0 || h.profit >= 0) return false;
+   ulong bt = 0, wt = 0; double bp = 0, wp = 0, wv = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || !Mine()) continue;
+      int k = Kind(), d = Dir(); double p = PL();
+      if(k == 0 && d == dir && p > bp)  { bp = p; bt = t; }
+      if(k == 1 && d == -dir && p < wp) { wp = p; wt = t; wv = PositionGetDouble(POSITION_VOLUME); }
+     }
+   if(bt == 0 || wt == 0 || bp <= InpPairMinUSD || wv <= 0) return false;
+   double st = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP); if(st <= 0) st = 0.01;
+   double perLot = -wp / wv;                                   // hedge ka loss per lot
+   double v = MathFloor((bp - InpPairMinUSD) / perLot / st + 1e-9) * st;
+   bool full = v >= wv - 1e-9;
+   if(!full && wv - v < VolMin() - 1e-9)                      // bacha hissa min lot se kam na ho
+     {
+      if(bp + wp >= InpPairMinUSD) full = true;
+      else v = MathFloor((wv - VolMin()) / st + 1e-9) * st;
+     }
+   if(!full && v < VolMin() - 1e-9) return false;
+   double lossPart = full ? wp : -perLot * v;
+   PrintFormat("SMART HEDGE KAM: profit trade %+.2f + hedge %.2f lot %+.2f = %+.2f",
+               bp, full ? wv : v, lossPart, bp + lossPart);
+   if(!trade.PositionClose(bt)) return false;                  // profit wala pehle
+   if(full) trade.PositionClose(wt);
+   else     trade.PositionClosePartial(wt, NormalizeDouble(v, 2));
+   return true;
+  }
+
 bool ManageHedge(int dir, SideInfo &s, Grp &h)
   {
    int k = dir == 1 ? 0 : 1;
@@ -470,6 +506,25 @@ bool ManageHedge(int dir, SideInfo &s, Grp &h)
          hedgeClosed[k] = TimeCurrent();
          return true;
         }
+      // price wapas side ke favour me = hedge dheere-dheere chhota (har close total plus me)
+      if(s.n > 0 && ht != -dir && HedgeReduce(dir, h)) return true;
+      // step hedge: price hedge se 1 DCA step aur ulta gaya = baaki hedge
+      if(InpHedgeSteps && h.n == 1 && s.n > 0)
+        {
+         double tgt = MathMin(NormLot(s.lots * rtHedgePct / 100.0), s.lots);
+         double add = tgt - h.lots;
+         double far = dir == 1 ? GAvg(h) - SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK) - GAvg(h);
+         if(add >= VolMin() && far >= rtDCA && Spread() <= InpMaxSpread && s.profit < 0)
+           {
+            add = NormLot(add);
+            if(Open(-dir, add, "HEDGE"))
+              {
+               PrintFormat("%s side: price $%.1f aur ulta, HEDGE step 2: %s %.2f lot (kul %.2f)",
+                           side, far, dir == 1 ? "SELL" : "BUY", add, h.lots + add);
+               return true;
+              }
+           }
+        }
       if(s.n == 0) OrphanHedgeTP(-dir);   // side band ho gayi: hedge ko normal TP
       return false;
      }
@@ -483,10 +538,12 @@ bool ManageHedge(int dir, SideInfo &s, Grp &h)
    if(TimeCurrent() - hedgeClosed[k] < InpHedgeCoolMin * 60) return false;
    if(Spread() > InpMaxSpread) return false;
    double lot = MathMin(NormLot(s.lots * rtHedgePct / 100.0), s.lots);   // kabhi side se zyada nahi
+   if(InpHedgeSteps) lot = NormLot(lot / 2.0);                           // step 1 = aadha
    if(lot < VolMin()) return false;
    if(!Open(-dir, lot, "HEDGE")) return false;
-   PrintFormat("%s side phansi (%d pos, %+.2f = %.1f%%), %s: HEDGE %s %.2f lot (%.0f%%)",
-               side, s.n, s.profit, lossPct, normal ? "trend ulta" : "loss bada", dir == 1 ? "SELL" : "BUY", lot, rtHedgePct);
+   PrintFormat("%s side phansi (%d pos, %+.2f = %.1f%%), %s: HEDGE%s %s %.2f lot (target %.0f%%)",
+               side, s.n, s.profit, lossPct, normal ? "trend ulta" : "loss bada", InpHedgeSteps ? " step 1" : "",
+               dir == 1 ? "SELL" : "BUY", lot, rtHedgePct);
    return true;
   }
 
@@ -708,8 +765,8 @@ void Panel()
    Tx("net", 10, y, StringFormat("NET %+.2f  (net lot %+.2f)", allProfit, buyLotsAll - sellLotsAll), allProfit >= 0 ? cB : cS, 9, true);
    y += 18;
    string pr = StringFormat("Hedge: BUY-side %s | SELL-side %s",
-                            HB.n > 0 ? StringFormat("%.2f (%+.2f)%s", HB.lots, HB.profit, hedgeBE[0] ? " LOCK" : "") : "-",
-                            HS.n > 0 ? StringFormat("%.2f (%+.2f)%s", HS.lots, HS.profit, hedgeBE[1] ? " LOCK" : "") : "-");
+                            HB.n > 0 ? StringFormat("%.2f/%d (%+.2f)%s", HB.lots, HB.n, HB.profit, hedgeBE[0] ? " LOCK" : "") : "-",
+                            HS.n > 0 ? StringFormat("%.2f/%d (%+.2f)%s", HS.lots, HS.n, HS.profit, hedgeBE[1] ? " LOCK" : "") : "-");
    Tx("hg", 10, y, pr, HB.n + HS.n > 0 ? cW : cDm, 8);
    y += 16;
    Tx("lk", 10, y, LK.n > 0 ? StringFormat("LOCK ON (%s) %.2f lot  P/L %+.2f", LockName(), LK.lots, LK.profit) : "LOCK: OFF",

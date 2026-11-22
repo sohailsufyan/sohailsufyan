@@ -21,3 +21,5 @@ Gold sets → GoldHedgeScalper (XAUUSD chart). BTC sets → BTCHedgeScalper (BTC
 **v1.20 (sab sets me):** Pair Close ON ($0.20+), Recovery Hedge 50% (max 100%, ek side ka ek hedge), Auto LOCK (margin 200% / Safe+Small 300% / Aggressive 150%, USD high-impact news ±15 min), manual trade ka apna SL/TP waisa hi rahe. Breakeven: Gold +$1.5 chale to SL average + $0.50, BTC +$40 chale to average + $20.
 
 **v1.21:** Hedge sirf M1 trend se (H1 ka intezaar nahi), loss ≥ 5% balance par hedge turant, hedge ka profit lock.
+
+**v1.22:** Step Hedge (25% + 25%) aur Smart Hedge Kam (price wapas aaye to hedge ka hissa profit trade ke saath band, total plus) ON.

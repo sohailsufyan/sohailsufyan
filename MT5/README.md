@@ -213,6 +213,10 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
   - **Loss bada:** side ka loss ≥ 5% balance (`InpRecHardPct`) aur M1 side ke favour me nahi → hedge turant
   - **Hedge profit lock:** hedge +BE trigger chala (Gold $1.5 / BTC $40), wapas +lock (Gold $0.50 / BTC $20) par aaya → hedge profit me band
   - Panel: `Trend: UP (M1 DOWN)` aur hedge par `LOCK` dikhata hai
+- **v1.22 (Gold + BTC):** hedge ka risk kam, profit nahi ghatta
+  - **Step Hedge** (`InpHedgeSteps`): pehle target ka aadha (50% → 25%), price hedge se 1 DCA step aur ulta gaya to baaki
+  - **Smart Hedge Kam** (`InpHedgeReduce`): price wapas side ke favour me aur hedge loss me → side ka sabse profit wala trade + hedge ka utna hissa (partial close) jitna wo cover kare, total ≥ +$0.20. Hedge dheere-dheere chhota, recovery point neeche
+  - Panel: hedge line me lot/positions count
 
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
 - TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
