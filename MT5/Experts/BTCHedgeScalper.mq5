@@ -1,18 +1,19 @@
 //+------------------------------------------------------------------+
 //|                                            BTCHedgeScalper.mq5   |
-//|  BTCUSD M1 hedge scalper (crypto 24/7)  v1.20                     |
+//|  BTCUSD M1 hedge scalper (crypto 24/7)  v1.21                     |
 //|  - Har naye M1 candle par EMA trend ki direction me trade         |
 //|    (ya BOTH mode: BUY + SELL dono)                                |
 //|  - Har position ka apna TP (+$30), $150 against par DCA           |
 //|  - Side +$40 chale to SL breakeven +$20                           |
 //|  - Pair Close: phansa trade + profit wale trades saath band       |
-//|  - Recovery Hedge: side phanse + trend ulta = 50% hedge (max 100%)|
+//|  - Recovery Hedge: side phanse + M1 trend ulta (ya loss 5%+)      |
+//|    = 50% hedge (max 100%), hedge ka profit lock                    |
 //|  - Auto LOCK: margin kam ya badi news = net lot 0                 |
 //|  - Har group close sirf total profit me                           |
 //|  - Manual trade ka apna SL/TP waisa hi rahe                       |
 //+------------------------------------------------------------------+
 #property copyright "BTCHedgeScalper"
-#property version   "1.20"
+#property version   "1.21"
 
 #include <Trade/Trade.mqh>
 
@@ -58,6 +59,8 @@ input int             InpRecLayers        = 3;            // Side me itni positi
 input double          InpRecLossPct       = 3.0;          // ya side ka loss balance ka itna % (0 = off)
 input double          InpHedgeCloseUSD    = 1.0;          // Side + hedge total itna +$ = dono band
 input int             InpHedgeCoolMin     = 15;           // Hedge band hone ke baad itne min naya hedge nahi
+input bool            InpHedgeFastTrend   = true;         // Hedge ke liye sirf M1 trend dekho (H1 ka intezaar nahi)
+input double          InpRecHardPct       = 5.0;          // Side ka loss balance ka itna % = hedge (M1 side ke favour me na ho) (0 = off)
 
 input group "=== Auto LOCK ==="
 input bool            InpAutoLock         = true;         // Auto LOCK ON
@@ -85,17 +88,18 @@ CTrade   trade;
 int      hF = INVALID_HANDLE, hS = INVALID_HANDLE, hH = INVALID_HANDLE;
 datetime lastBar = 0;
 bool     autoOn, rtAuto, rtHedge, rtPair, rtAutoLock;
-int      mode, rtMax, curTrend = 0;
+int      mode, rtMax, curTrend = 0, curFast = 0;
 double   rtTP, rtDCA, rtLot, rtPer, rtHedgePct;
 #define  PFX "BHS_"
 
 struct SideInfo { int n; double lots, avg, worst, profit; bool be; double beSL; };
-struct Grp      { int n; double lots, profit; };
+struct Grp      { int n; double lots, profit, pv; };
 SideInfo SB, SS;                 // normal trades (AUTO / DCA / manual)
 Grp      HB, HS, LK;             // HB = BUY side ka hedge (SELL), HS = SELL side ka hedge (BUY), LK = LOCK trades
 double   allProfit, buyLotsAll, sellLotsAll;
 bool     anyLoss;
 datetime hedgeClosed[2];         // 0 = BUY side, 1 = SELL side
+bool     hedgeBE[2];             // hedge ka profit lock ON
 int      lockReason = 0;         // 0 none, 1 margin, 2 news, 3 manual
 datetime lockTime = 0;
 bool     newsNow = false;
@@ -117,7 +121,7 @@ int OnInit()
    rtHedge = InpRecHedge; rtPair = InpPairClose; rtAutoLock = InpAutoLock;
    rtHedgePct = MathMax(10.0, MathMin(100.0, InpHedgePct));
    SB.be = false; SS.be = false; SB.beSL = 0; SS.beSL = 0; SB.n = 0; SS.n = 0;
-   hedgeClosed[0] = 0; hedgeClosed[1] = 0;
+   hedgeClosed[0] = 0; hedgeClosed[1] = 0; hedgeBE[0] = false; hedgeBE[1] = false;
    gvLock = PFX + _Symbol + "_" + IntegerToString(InpMagic) + "_lock";
    if(GlobalVariableCheck(gvLock + "R"))
      {
@@ -172,8 +176,9 @@ double NormLot(double lot)
    return NormalizeDouble(MathMax(mn, MathMin(lot, mx)), 2);
   }
 
-void ZeroG(Grp &g) { g.n = 0; g.lots = 0; g.profit = 0; }
-void AddG(Grp &g, double v, double p) { g.n++; g.lots += v; g.profit += p; }
+void ZeroG(Grp &g) { g.n = 0; g.lots = 0; g.profit = 0; g.pv = 0; }
+void AddG(Grp &g, double v, double p, double op) { g.n++; g.lots += v; g.profit += p; g.pv += v * op; }
+double GAvg(Grp &g) { return g.lots > 0 ? g.pv / g.lots : 0; }
 
 void ReadSide(int dir, SideInfo &s)
   {
@@ -205,8 +210,9 @@ void ReadAll()
       int d = Dir(), k = Kind();
       allProfit += p; if(p < 0) anyLoss = true;
       if(d == 1) buyLotsAll += v; else sellLotsAll += v;
-      if(k == 2) AddG(LK, v, p);
-      else if(k == 1) { if(d == -1) AddG(HB, v, p); else AddG(HS, v, p); }
+      double op = PositionGetDouble(POSITION_PRICE_OPEN);
+      if(k == 2) AddG(LK, v, p, op);
+      else if(k == 1) { if(d == -1) AddG(HB, v, p, op); else AddG(HS, v, p, op); }
      }
   }
 
@@ -236,6 +242,14 @@ int Trend()
       if(h == 0 || (t == 1 && hc < h) || (t == -1 && hc > h)) return 0;
      }
    return t;
+  }
+
+// Sirf entry TF (M1) ka EMA trend, bade TF ke bina - hedge ke liye
+int FastTrend()
+  {
+   double f = B1(hF, 1), sl = B1(hS, 1), c = iClose(_Symbol, InpSigTF, 1);
+   if(f == 0 || sl == 0) return 0;
+   return (f > sl && c > f) ? 1 : ((f < sl && c < f) ? -1 : 0);
   }
 
 // Capital ke hisaab se lot (AUTO) ya fixed
@@ -425,6 +439,8 @@ bool ManageHedge(int dir, SideInfo &s, Grp &h)
   {
    int k = dir == 1 ? 0 : 1;
    string side = dir == 1 ? "BUY" : "SELL";
+   int ht = InpHedgeFastTrend ? curFast : curTrend;     // hedge ke liye trend
+   if(h.n == 0) hedgeBE[k] = false;
    if(h.n > 0)
      {
       // side + hedge ka total profit me = dono band
@@ -437,9 +453,19 @@ bool ManageHedge(int dir, SideInfo &s, Grp &h)
          return true;
         }
       // trend wapas side ke favour me (ya side khali) + hedge profit me = sirf hedge band
-      if(h.profit >= InpHedgeCloseUSD && (s.n == 0 || curTrend == dir))
+      if(h.profit >= InpHedgeCloseUSD && (s.n == 0 || ht == dir))
         {
          PrintFormat("%s side ka hedge profit me band: %+.2f", side, h.profit);
+         CloseWhere(-dir, 1);
+         hedgeClosed[k] = TimeCurrent();
+         return true;
+        }
+      // hedge ka profit lock: hedge +BE trigger chala, phir wapas +lock par aaya = hedge profit me band
+      double hm = dir == 1 ? GAvg(h) - SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID) - GAvg(h);
+      if(!hedgeBE[k] && hm >= InpBETrigger) { hedgeBE[k] = true; PrintFormat("%s side ka hedge +$%.1f chala: profit lock ON", side, hm); }
+      if(hedgeBE[k] && hm <= InpBELock && h.profit > 0)
+        {
+         PrintFormat("%s side ka hedge profit lock par band: %+.2f", side, h.profit);
          CloseWhere(-dir, 1);
          hedgeClosed[k] = TimeCurrent();
          return true;
@@ -448,16 +474,19 @@ bool ManageHedge(int dir, SideInfo &s, Grp &h)
       return false;
      }
    if(!rtHedge || s.n == 0 || s.profit >= 0) return false;
-   bool stuck = s.n >= InpRecLayers ||
-                (InpRecLossPct > 0 && -s.profit >= AccountInfoDouble(ACCOUNT_BALANCE) * InpRecLossPct / 100.0);
-   if(!stuck || curTrend != -dir) return false;
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double lossPct = bal > 0 ? -s.profit / bal * 100.0 : 0;
+   bool stuck = s.n >= InpRecLayers || (InpRecLossPct > 0 && lossPct >= InpRecLossPct);
+   bool normal = stuck && ht == -dir;                                       // phansi + trend ulta
+   bool hard = InpRecHardPct > 0 && lossPct >= InpRecHardPct && ht != dir;  // loss bada + price side ke favour me nahi
+   if(!normal && !hard) return false;
    if(TimeCurrent() - hedgeClosed[k] < InpHedgeCoolMin * 60) return false;
    if(Spread() > InpMaxSpread) return false;
    double lot = MathMin(NormLot(s.lots * rtHedgePct / 100.0), s.lots);   // kabhi side se zyada nahi
    if(lot < VolMin()) return false;
    if(!Open(-dir, lot, "HEDGE")) return false;
-   PrintFormat("%s side phansi (%d pos, %+.2f), trend ulta: HEDGE %s %.2f lot (%.0f%%)",
-               side, s.n, s.profit, dir == 1 ? "SELL" : "BUY", lot, rtHedgePct);
+   PrintFormat("%s side phansi (%d pos, %+.2f = %.1f%%), %s: HEDGE %s %.2f lot (%.0f%%)",
+               side, s.n, s.profit, lossPct, normal ? "trend ulta" : "loss bada", dir == 1 ? "SELL" : "BUY", lot, rtHedgePct);
    return true;
   }
 
@@ -513,6 +542,7 @@ void OnTick()
    ReadAll();
    UpdateNews();
    curTrend = Trend();
+   curFast = FastTrend();
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    if(LK.n == 0 && lockReason != 0) ResetLock();
 
@@ -663,7 +693,8 @@ void Panel()
    Rc("bg", 0, 0, W, 100, cBg);
    Tx("ti", 10, 6, "BTC HEDGE SCALPER", cTx, 10, true);
    double ml = AccountInfoDouble(ACCOUNT_MARGIN) > 0 ? AccountInfoDouble(ACCOUNT_MARGIN_LEVEL) : 0;
-   Tx("st", 10, 24, StringFormat("Trend: %s  |  Margin %s  |  Spread %.0f%s", curTrend == 1 ? "UP" : (curTrend == -1 ? "DOWN" : "SIDE"),
+   Tx("st", 10, 24, StringFormat("Trend: %s (M1 %s) | Margin %s | Spread %.0f%s", curTrend == 1 ? "UP" : (curTrend == -1 ? "DOWN" : "SIDE"),
+      curFast == 1 ? "UP" : (curFast == -1 ? "DOWN" : "SIDE"),
       ml > 0 ? StringFormat("%.0f%%", ml) : "-", Spread(), newsNow ? "  |  NEWS" : ""), MarginOK() && !newsNow ? cDm : cS, 8);
    y = 44;
    Rc("cb", 6, y, W - 12, 22, cCard);
@@ -677,8 +708,8 @@ void Panel()
    Tx("net", 10, y, StringFormat("NET %+.2f  (net lot %+.2f)", allProfit, buyLotsAll - sellLotsAll), allProfit >= 0 ? cB : cS, 9, true);
    y += 18;
    string pr = StringFormat("Hedge: BUY-side %s | SELL-side %s",
-                            HB.n > 0 ? StringFormat("%.2f (%+.2f)", HB.lots, HB.profit) : "-",
-                            HS.n > 0 ? StringFormat("%.2f (%+.2f)", HS.lots, HS.profit) : "-");
+                            HB.n > 0 ? StringFormat("%.2f (%+.2f)%s", HB.lots, HB.profit, hedgeBE[0] ? " LOCK" : "") : "-",
+                            HS.n > 0 ? StringFormat("%.2f (%+.2f)%s", HS.lots, HS.profit, hedgeBE[1] ? " LOCK" : "") : "-");
    Tx("hg", 10, y, pr, HB.n + HS.n > 0 ? cW : cDm, 8);
    y += 16;
    Tx("lk", 10, y, LK.n > 0 ? StringFormat("LOCK ON (%s) %.2f lot  P/L %+.2f", LockName(), LK.lots, LK.profit) : "LOCK: OFF",
@@ -726,6 +757,7 @@ void OnChartEvent(const int id, const long &l, const double &d, const string &sp
    string b = StringSubstr(sp, StringLen(PFX + "btn_"));
    ReadAll();
    curTrend = Trend();
+   curFast = FastTrend();
    if(b == "auto") autoOn = !autoOn;
    else if(b == "mode") mode = (mode == MODE_TREND) ? MODE_BOTH : MODE_TREND;
    else if(b == "lock") DoLock(3);

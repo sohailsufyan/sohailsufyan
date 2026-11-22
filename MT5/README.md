@@ -208,6 +208,11 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
   - **Manual trades:** apna TP/SL waisa hi rahe (TP nahi hai to panel TP lagega), breakeven SL sirf profit ki taraf; pehle se khule trades bhi manage
   - Panel: HEDGE / PAIR / A-LOCK ON-OFF buttons, Hedge % −/+, hedge aur lock status line
   - Fix: FIXED lot mode me CurLot() khud ko call karta tha (recursion) – theek kiya
+- **v1.21 (Gold + BTC):** Hedge ab H1 ka intezaar nahi karta
+  - Hedge trend = sirf **M1 EMA 21/50** (`InpHedgeFastTrend`), entry ka trend filter (H1) waisa hi
+  - **Loss bada:** side ka loss ≥ 5% balance (`InpRecHardPct`) aur M1 side ke favour me nahi → hedge turant
+  - **Hedge profit lock:** hedge +BE trigger chala (Gold $1.5 / BTC $40), wapas +lock (Gold $0.50 / BTC $20) par aaya → hedge profit me band
+  - Panel: `Trend: UP (M1 DOWN)` aur hedge par `LOCK` dikhata hai
 
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
 - TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
