@@ -34,7 +34,7 @@ input int             InpMaxSpread        = 3000;         // Max spread (cents, 
 input group "=== Exit (turant profit) ==="
 input double          InpTP               = 30.0;         // Har position ka TP: entry se +$30
 input double          InpBETrigger        = 30.0;         // Side average se +$30 par sab positions ka SL breakeven
-input double          InpBELock           = 5.0;          // Breakeven = average + $5 (loss na ho)
+input double          InpBELock           = 20.0;         // Breakeven = average + $20 (loss na ho)
 input bool            InpNetClose         = true;         // BUY + SELL net profit me = sab close
 input double          InpNetCloseUSD      = 5.0;          // Net kam se kam $
 
