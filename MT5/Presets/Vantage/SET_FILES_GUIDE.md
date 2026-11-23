@@ -23,3 +23,5 @@ Gold sets → GoldHedgeScalper (XAUUSD chart). BTC sets → BTCHedgeScalper (BTC
 **v1.21:** Hedge sirf M1 trend se (H1 ka intezaar nahi), loss ≥ 5% balance par hedge turant, hedge ka profit lock.
 
 **v1.22:** Step Hedge (25% + 25%) aur Smart Hedge Kam (price wapas aaye to hedge ka hissa profit trade ke saath band, total plus) ON.
+
+**v1.23:** Entry filters ON – Pullback (EMA21 se max 1 ATR), RSI 70/30, ADX(M15) ≥ 20, 2 entry ke beech 3 min gap.

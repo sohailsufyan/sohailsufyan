@@ -1,7 +1,8 @@
 //+------------------------------------------------------------------+
 //|                                            BTCHedgeScalper.mq5   |
-//|  BTCUSD M1 hedge scalper (crypto 24/7)  v1.22                     |
+//|  BTCUSD M1 hedge scalper (crypto 24/7)  v1.23                     |
 //|  - Har naye M1 candle par EMA trend ki direction me trade         |
+//|    + filters: pullback (EMA21 ke paas), RSI, ADX, entry gap      |
 //|    (ya BOTH mode: BUY + SELL dono)                                |
 //|  - Har position ka apna TP (+$30), $150 against par DCA           |
 //|  - Side +$40 chale to SL breakeven +$20                           |
@@ -14,7 +15,7 @@
 //|  - Manual trade ka apna SL/TP waisa hi rahe                       |
 //+------------------------------------------------------------------+
 #property copyright "BTCHedgeScalper"
-#property version   "1.22"
+#property version   "1.23"
 
 #include <Trade/Trade.mqh>
 
@@ -65,6 +66,19 @@ input double          InpRecHardPct       = 5.0;          // Side ka loss balanc
 input bool            InpHedgeSteps       = true;         // Step hedge: pehle aadha, price 1 DCA step aur gire to baaki
 input bool            InpHedgeReduce      = true;         // Smart hedge kam: profit wala trade + hedge ka hissa saath band (total plus)
 
+input group "=== Entry filters (TREND mode) ==="
+input bool            InpUseFilters       = true;         // Filters ON (panel button se bhi)
+input bool            InpUsePullback      = true;         // Pullback: price EMA21 ke paas ho tabhi entry (bhaagte price par nahi)
+input double          InpPullbackATR      = 1.0;          // EMA21 se max doori = itne ATR(14)
+input bool            InpUseRSI           = true;         // RSI filter
+input int             InpRSIPeriod        = 14;           // RSI period
+input double          InpRSIBuyMax        = 70.0;         // RSI isse upar = BUY nahi (overbought)
+input double          InpRSISellMin       = 30.0;         // RSI isse neeche = SELL nahi (oversold)
+input bool            InpUseADX           = true;         // ADX filter: side-ways market me entry nahi
+input ENUM_TIMEFRAMES InpADXTF            = PERIOD_M15;   // ADX timeframe
+input double          InpADXMin           = 20.0;         // ADX isse kam = entry nahi
+input int             InpMinGapMin        = 3;            // Ek side me 2 AUTO entry ke beech kam se kam itne minute (BOTH mode me bhi)
+
 input group "=== Auto LOCK ==="
 input bool            InpAutoLock         = true;         // Auto LOCK ON
 input double          InpLockMarginLevel  = 200.0;        // Margin level isse kam = auto LOCK
@@ -89,8 +103,9 @@ input int             InpPanelY           = 25;
 //==================== GLOBALS ====================
 CTrade   trade;
 int      hF = INVALID_HANDLE, hS = INVALID_HANDLE, hH = INVALID_HANDLE;
+int      hRSI = INVALID_HANDLE, hATR = INVALID_HANDLE, hADX = INVALID_HANDLE;
 datetime lastBar = 0;
-bool     autoOn, rtAuto, rtHedge, rtPair, rtAutoLock;
+bool     autoOn, rtAuto, rtHedge, rtPair, rtAutoLock, rtFilter;
 int      mode, rtMax, curTrend = 0, curFast = 0;
 double   rtTP, rtDCA, rtLot, rtPer, rtHedgePct;
 #define  PFX "BHS_"
@@ -102,6 +117,8 @@ Grp      HB, HS, LK;             // HB = BUY side ka hedge (SELL), HS = SELL sid
 double   allProfit, buyLotsAll, sellLotsAll;
 bool     anyLoss;
 datetime hedgeClosed[2];         // 0 = BUY side, 1 = SELL side
+datetime lastAuto[2];            // aakhri AUTO entry ka time (0 = BUY, 1 = SELL)
+string   entryWhy = "-";         // panel: entry kyun hui / kyun ruki
 bool     hedgeBE[2];             // hedge ka profit lock ON
 int      lockReason = 0;         // 0 none, 1 margin, 2 news, 3 manual
 datetime lockTime = 0;
@@ -118,10 +135,15 @@ int OnInit()
    hF = iMA(_Symbol, InpSigTF, InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
    hS = iMA(_Symbol, InpSigTF, InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
    hH = iMA(_Symbol, InpHTF, 50, 0, MODE_EMA, PRICE_CLOSE);
-   if(hF == INVALID_HANDLE || hS == INVALID_HANDLE || hH == INVALID_HANDLE) return(INIT_FAILED);
+   hRSI = iRSI(_Symbol, InpSigTF, InpRSIPeriod, PRICE_CLOSE);
+   hATR = iATR(_Symbol, InpSigTF, 14);
+   hADX = iADX(_Symbol, InpADXTF, 14);
+   if(hF == INVALID_HANDLE || hS == INVALID_HANDLE || hH == INVALID_HANDLE ||
+      hRSI == INVALID_HANDLE || hATR == INVALID_HANDLE || hADX == INVALID_HANDLE) return(INIT_FAILED);
    autoOn = InpAutoOn; mode = InpMode; rtTP = InpTP; rtDCA = InpDCAStep; rtLot = InpLot; rtMax = InpMaxPerSide;
    rtAuto = InpAutoLot; rtPer = InpBalancePer001;
-   rtHedge = InpRecHedge; rtPair = InpPairClose; rtAutoLock = InpAutoLock;
+   rtHedge = InpRecHedge; rtPair = InpPairClose; rtAutoLock = InpAutoLock; rtFilter = InpUseFilters;
+   lastAuto[0] = 0; lastAuto[1] = 0;
    rtHedgePct = MathMax(10.0, MathMin(100.0, InpHedgePct));
    SB.be = false; SS.be = false; SB.beSL = 0; SS.beSL = 0; SB.n = 0; SS.n = 0;
    hedgeClosed[0] = 0; hedgeClosed[1] = 0; hedgeBE[0] = false; hedgeBE[1] = false;
@@ -143,6 +165,7 @@ void OnDeinit(const int r)
   {
    EventKillTimer();
    IndicatorRelease(hF); IndicatorRelease(hS); IndicatorRelease(hH);
+   IndicatorRelease(hRSI); IndicatorRelease(hATR); IndicatorRelease(hADX);
    ObjectsDeleteAll(0, PFX);
   }
 
@@ -253,6 +276,32 @@ int FastTrend()
    double f = B1(hF, 1), sl = B1(hS, 1), c = iClose(_Symbol, InpSigTF, 1);
    if(f == 0 || sl == 0) return 0;
    return (f > sl && c > f) ? 1 : ((f < sl && c < f) ? -1 : 0);
+  }
+
+// Entry filter: "" = entry theek, warna rukne ki wajah
+string EntryBlock(int dir)
+  {
+   int k = dir == 1 ? 0 : 1;
+   if(InpMinGapMin > 0 && TimeCurrent() - lastAuto[k] < InpMinGapMin * 60) return "gap " + IntegerToString(InpMinGapMin) + " min";
+   if(!rtFilter || mode == MODE_BOTH) return "";
+   if(InpUseADX)
+     {
+      double a = B1(hADX, 1);
+      if(a > 0 && a < InpADXMin) return StringFormat("ADX %.0f < %.0f (side-ways)", a, InpADXMin);
+     }
+   if(InpUseRSI)
+     {
+      double r = B1(hRSI, 1);
+      if(r > 0 && dir == 1 && r >= InpRSIBuyMax)   return StringFormat("RSI %.0f (overbought)", r);
+      if(r > 0 && dir == -1 && r <= InpRSISellMin) return StringFormat("RSI %.0f (oversold)", r);
+     }
+   if(InpUsePullback)
+     {
+      double e = B1(hF, 1), at = B1(hATR, 1), c = iClose(_Symbol, InpSigTF, 1);
+      double d = dir == 1 ? c - e : e - c;
+      if(at > 0 && d > InpPullbackATR * at) return StringFormat("price EMA21 se %.1f ATR door", d / at);
+     }
+   return "";
   }
 
 // Capital ke hisaab se lot (AUTO) ya fixed
@@ -646,12 +695,40 @@ void OnTick()
    if(bar != lastBar)
      {
       lastBar = bar;
-      if(autoOn && roomOK && SessionOK())
+      if(!autoOn) entryWhy = "AUTO OFF";
+      else if(!SessionOK()) entryWhy = "session ke bahar";
+      else if(!roomOK) entryWhy = !MarginOK() ? "margin kam" : (Spread() > InpMaxSpread ? "spread zyada" : "news time");
+      else if(mode == MODE_TREND && curTrend == 0) entryWhy = "trend SIDE (M1/H1 match nahi)";
+      else
         {
          bool wantB = (mode == MODE_BOTH) || curTrend == 1;
          bool wantS = (mode == MODE_BOTH) || curTrend == -1;
-         if(wantB && SB.n < rtMax && !SB.be && HB.n == 0) Open(1, CurLot(), "AUTO");
-         if(wantS && SS.n < rtMax && !SS.be && HS.n == 0) Open(-1, CurLot(), "AUTO");
+         string wb = "", ws = "";
+         if(wantB)
+           {
+            if(SB.n >= rtMax) wb = "max per side";
+            else if(SB.be) wb = "breakeven lagi";
+            else if(HB.n > 0) wb = "hedge laga";
+            else wb = EntryBlock(1);
+            if(wb == "")
+              {
+               if(Open(1, CurLot(), "AUTO")) { lastAuto[0] = TimeCurrent(); wb = "khula"; }
+               else wb = "order fail (Experts tab)";
+              }
+           }
+         if(wantS)
+           {
+            if(SS.n >= rtMax) ws = "max per side";
+            else if(SS.be) ws = "breakeven lagi";
+            else if(HS.n > 0) ws = "hedge laga";
+            else ws = EntryBlock(-1);
+            if(ws == "")
+              {
+               if(Open(-1, CurLot(), "AUTO")) { lastAuto[1] = TimeCurrent(); ws = "khula"; }
+               else ws = "order fail (Experts tab)";
+              }
+           }
+         entryWhy = (wantB ? "BUY " + wb : "") + (wantB && wantS ? " | " : "") + (wantS ? "SELL " + ws : "");
         }
      }
    Panel();
@@ -771,6 +848,8 @@ void Panel()
    y += 16;
    Tx("lk", 10, y, LK.n > 0 ? StringFormat("LOCK ON (%s) %.2f lot  P/L %+.2f", LockName(), LK.lots, LK.profit) : "LOCK: OFF",
       LK.n > 0 ? cW : cDm, 8, LK.n > 0);
+   y += 16;
+   Tx("ew", 10, y, "Entry: " + entryWhy, StringFind(entryWhy, "khula") >= 0 ? cB : cDm, 8);
    y += 20;
    int bw = (W - 12 - 8) / 3;
    Bt("auto", 6, y, bw, 22, autoOn ? "AUTO ON" : "AUTO OFF", autoOn ? cB : cLn, autoOn ? cBg : cTx);
@@ -785,8 +864,9 @@ void Panel()
    OnOff("pair", 6 + bw + 4, y, bw, "PAIR", rtPair);
    OnOff("alock", 6 + 2 * (bw + 4), y, bw, "A-LOCK", rtAutoLock);
    y += 26;
-   Bt("ca", 6, y, (W - 16) / 2, 22, "CLOSE ALL", cS, clrWhite);
-   Bt("lotmode", 6 + (W - 16) / 2 + 4, y, (W - 16) / 2, 22, rtAuto ? "LOT: AUTO (capital)" : "LOT: FIXED", rtAuto ? cB : cLn, rtAuto ? cBg : cTx);
+   Bt("ca", 6, y, bw, 22, "CLOSE ALL", cS, clrWhite);
+   Bt("lotmode", 6 + bw + 4, y, bw, 22, rtAuto ? "LOT: AUTO" : "LOT: FIXED", rtAuto ? cB : cLn, rtAuto ? cBg : cTx);
+   OnOff("filt", 6 + 2 * (bw + 4), y, bw, "FILTER", rtFilter);
    y += 28;
    string lab[5];
    string ids[5] = {"tp", "dca", "lot", "max", "hp"};
@@ -829,6 +909,7 @@ void OnChartEvent(const int id, const long &l, const double &d, const string &sp
    else if(b == "hedge") rtHedge = !rtHedge;
    else if(b == "pair") rtPair = !rtPair;
    else if(b == "alock") rtAutoLock = !rtAutoLock;
+   else if(b == "filt") rtFilter = !rtFilter;
    else if(b == "tpm" || b == "tpp") rtTP = MathMax(0.0, rtTP + (b == "tpp" ? 5.0 : -5.0));
    else if(b == "dcam" || b == "dcap") rtDCA = MathMax(10.0, rtDCA + (b == "dcap" ? 25.0 : -25.0));
    else if(b == "hpm" || b == "hpp") rtHedgePct = MathMax(10.0, MathMin(100.0, rtHedgePct + (b == "hpp" ? 10.0 : -10.0)));

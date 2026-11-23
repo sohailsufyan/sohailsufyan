@@ -217,6 +217,12 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
   - **Step Hedge** (`InpHedgeSteps`): pehle target ka aadha (50% → 25%), price hedge se 1 DCA step aur ulta gaya to baaki
   - **Smart Hedge Kam** (`InpHedgeReduce`): price wapas side ke favour me aur hedge loss me → side ka sabse profit wala trade + hedge ka utna hissa (partial close) jitna wo cover kare, total ≥ +$0.20. Hedge dheere-dheere chhota, recovery point neeche
   - Panel: hedge line me lot/positions count
+- **v1.23 (Gold + BTC): Entry filters** (TREND mode, panel button FILTER ON/OFF)
+  - **Pullback:** price EMA21 se max 1×ATR(14) door ho tabhi entry (bhaagte price / top par nahi)
+  - **RSI(14):** RSI ≥ 70 = BUY nahi, RSI ≤ 30 = SELL nahi
+  - **ADX(14, M15):** ADX < 20 (side-ways) = entry nahi
+  - **Gap:** ek side me 2 AUTO entry ke beech min 3 minute (BOTH mode me bhi)
+  - Panel line `Entry:` batati hai trade khula ya kyun ruka (trend SIDE, RSI, ADX, gap, spread, margin, news, max, hedge)
 
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
 - TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
