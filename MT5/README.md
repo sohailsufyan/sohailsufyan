@@ -233,3 +233,21 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
 - TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
 - Panel steps: TP ±$5, DCA ±$25; lot AUTO (0.01 / $1000) ya FIXED
+
+---
+
+# GoldBreakoutEA – Asian Range Breakout (XAUUSD)
+
+- **Range:** Server time 00:00–07:00 ke M5 bars ka High/Low (chart par box draw hota hai)
+- **Filter:** Range $3–$25 ke beech ho tabhi us din trade; optional H1 EMA200 trend filter
+- **Entry (08:00–16:00):** Candle close range high + $0.50 ke upar → BUY, range low − $0.50 ke neeche → SELL.
+  Din me max 1 buy + 1 sell (total max 2)
+- **SL:** Range size × 0.5 (min $3, max $15) | **TP:** SL × 2
+- **Management:** 1R par breakeven (+$0.30 lock), optional trailing, 22:00 par sab close (overnight nahi)
+- **Lot:** Balance ka 1% risk (ya fixed lot). Risk lot broker minimum se kam ho to trade skip
+- **Protection:** Daily loss 3% → us din naye trade band; Equity stop 6% → sab close; max lots, spread, Friday 14:00 ke baad entry nahi, Close-All switch
+- **Koi martingale / grid / DCA / hedge nahi.** Har order par SL lagta hai.
+
+**Install:** `Experts/GoldBreakoutEA.mq5` → `MQL5/Experts/`, MetaEditor me F7, XAUUSD **M15** chart par lagayein.
+Apne broker ka server time check karke range/session hours adjust karein (defaults GMT+2/+3 broker ke liye).
+Strategy Tester: *Every tick based on real ticks*, 2–3 saal, phir demo.
