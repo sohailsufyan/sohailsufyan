@@ -223,6 +223,12 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
   - **ADX(14, M15):** ADX < 20 (side-ways) = entry nahi
   - **Gap:** ek side me 2 AUTO entry ke beech min 3 minute (BOTH mode me bhi)
   - Panel line `Entry:` batati hai trade khula ya kyun ruka (trend SIDE, RSI, ADX, gap, spread, margin, news, max, hedge)
+- **v1.24 (Gold + BTC): High-probability lot boost + profit legs** (TREND mode; DCA/Hedge same)
+  - **HP score 0–5:** H4 EMA50 trend same, ADX(M15) ≥ 25, EMA21 se ≤ 0.5 ATR (gehra pullback), RSI momentum zone (BUY 45–65 / SELL 35–55), London–NY overlap 12–16 UTC
+  - **Lot boost:** score 4 → lot ×1.5, score 5 → ×2 (sirf AUTO entry, DCA base lot hi)
+  - **Profit legs:** side profit me + trend same + score ≥ 4 + price sabse achhi entry se 0.5×TP aage → naya leg (base lot), max 2 legs, har leg ka apna TP
+  - **DD guard:** account DD ≥ 3% → boost aur legs band; hedge lagi side par legs nahi
+  - Panel: HP LOT BOOST / PROFIT LEGS ON-OFF, `Entry:` line me `HP 4/5 lot x1.5` / `LEG khula`
 
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
 - TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666

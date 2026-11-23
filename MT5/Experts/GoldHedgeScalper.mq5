@@ -1,8 +1,9 @@
 //+------------------------------------------------------------------+
 //|                                           GoldHedgeScalper.mq5   |
-//|  XAUUSD M1 hedge scalper  v1.23                                   |
+//|  XAUUSD M1 hedge scalper  v1.24                                   |
 //|  - Har naye M1 candle par EMA trend ki direction me trade         |
 //|    + filters: pullback (EMA21 ke paas), RSI, ADX, entry gap      |
+//|    + High-probability score 0-5: zyada lot + profit me legs       |
 //|    (ya BOTH mode: BUY + SELL dono)                                |
 //|  - Har position ka apna chhota TP (+$1), $3 against par DCA       |
 //|  - Side +$1.5 chale to SL breakeven +$0.50                        |
@@ -15,7 +16,7 @@
 //|  - Manual trade ka apna SL/TP waisa hi rahe                       |
 //+------------------------------------------------------------------+
 #property copyright "GoldHedgeScalper"
-#property version   "1.23"
+#property version   "1.24"
 
 #include <Trade/Trade.mqh>
 
@@ -79,6 +80,16 @@ input ENUM_TIMEFRAMES InpADXTF            = PERIOD_M15;   // ADX timeframe
 input double          InpADXMin           = 20.0;         // ADX isse kam = entry nahi
 input int             InpMinGapMin        = 3;            // Ek side me 2 AUTO entry ke beech kam se kam itne minute (BOTH mode me bhi)
 
+input group "=== High probability: zyada lot + legs (TREND mode) ==="
+input bool            InpBoostOn          = true;         // HP score acha ho to lot badhao
+input int             InpBoostScore       = 4;            // Score (0-5) itna ya zyada = High probability
+input double          InpBoostMult        = 1.5;          // Score 4: lot x
+input double          InpBoostMult5       = 2.0;          // Score 5: lot x
+input bool            InpLegsOn           = true;         // Profit me chal rahi side me naye legs (pyramiding)
+input int             InpMaxLegs          = 2;            // Ek side me max profit legs
+input double          InpLegStepTP        = 0.5;          // Sabse achhi entry se itne x TP aage jaye tab naya leg
+input double          InpBoostMaxDD       = 3.0;          // Account DD isse zyada (%) = boost/legs band
+
 input group "=== Auto LOCK ==="
 input bool            InpAutoLock         = true;         // Auto LOCK ON
 input double          InpLockMarginLevel  = 200.0;        // Margin level isse kam = auto LOCK
@@ -103,14 +114,14 @@ input int             InpPanelY           = 25;
 //==================== GLOBALS ====================
 CTrade   trade;
 int      hF = INVALID_HANDLE, hS = INVALID_HANDLE, hH = INVALID_HANDLE;
-int      hRSI = INVALID_HANDLE, hATR = INVALID_HANDLE, hADX = INVALID_HANDLE;
+int      hRSI = INVALID_HANDLE, hATR = INVALID_HANDLE, hADX = INVALID_HANDLE, hH4 = INVALID_HANDLE;
 datetime lastBar = 0;
-bool     autoOn, rtAuto, rtHedge, rtPair, rtAutoLock, rtFilter;
+bool     autoOn, rtAuto, rtHedge, rtPair, rtAutoLock, rtFilter, rtBoost, rtLegs;
 int      mode, rtMax, curTrend = 0, curFast = 0;
 double   rtTP, rtDCA, rtLot, rtPer, rtHedgePct;
 #define  PFX "GHS_"
 
-struct SideInfo { int n; double lots, avg, worst, profit; bool be; double beSL; };
+struct SideInfo { int n, legs; double lots, avg, worst, best, profit; bool be; double beSL; };
 struct Grp      { int n; double lots, profit, pv; };
 SideInfo SB, SS;                 // normal trades (AUTO / DCA / manual)
 Grp      HB, HS, LK;             // HB = BUY side ka hedge (SELL), HS = SELL side ka hedge (BUY), LK = LOCK trades
@@ -138,14 +149,16 @@ int OnInit()
    hRSI = iRSI(_Symbol, InpSigTF, InpRSIPeriod, PRICE_CLOSE);
    hATR = iATR(_Symbol, InpSigTF, 14);
    hADX = iADX(_Symbol, InpADXTF, 14);
+   hH4  = iMA(_Symbol, PERIOD_H4, 50, 0, MODE_EMA, PRICE_CLOSE);
    if(hF == INVALID_HANDLE || hS == INVALID_HANDLE || hH == INVALID_HANDLE ||
-      hRSI == INVALID_HANDLE || hATR == INVALID_HANDLE || hADX == INVALID_HANDLE) return(INIT_FAILED);
+      hRSI == INVALID_HANDLE || hATR == INVALID_HANDLE || hADX == INVALID_HANDLE || hH4 == INVALID_HANDLE) return(INIT_FAILED);
    autoOn = InpAutoOn; mode = InpMode; rtTP = InpTP; rtDCA = InpDCAStep; rtLot = InpLot; rtMax = InpMaxPerSide;
    rtAuto = InpAutoLot; rtPer = InpBalancePer001;
    rtHedge = InpRecHedge; rtPair = InpPairClose; rtAutoLock = InpAutoLock; rtFilter = InpUseFilters;
+   rtBoost = InpBoostOn; rtLegs = InpLegsOn;
    lastAuto[0] = 0; lastAuto[1] = 0;
    rtHedgePct = MathMax(10.0, MathMin(100.0, InpHedgePct));
-   SB.be = false; SS.be = false; SB.beSL = 0; SS.beSL = 0; SB.n = 0; SS.n = 0;
+   SB.be = false; SS.be = false; SB.beSL = 0; SS.beSL = 0; SB.n = 0; SS.n = 0; SB.legs = 0; SS.legs = 0;
    hedgeClosed[0] = 0; hedgeClosed[1] = 0; hedgeBE[0] = false; hedgeBE[1] = false;
    gvLock = PFX + _Symbol + "_" + IntegerToString(InpMagic) + "_lock";
    if(GlobalVariableCheck(gvLock + "R"))
@@ -165,7 +178,7 @@ void OnDeinit(const int r)
   {
    EventKillTimer();
    IndicatorRelease(hF); IndicatorRelease(hS); IndicatorRelease(hH);
-   IndicatorRelease(hRSI); IndicatorRelease(hATR); IndicatorRelease(hADX);
+   IndicatorRelease(hRSI); IndicatorRelease(hATR); IndicatorRelease(hADX); IndicatorRelease(hH4);
    ObjectsDeleteAll(0, PFX);
   }
 
@@ -209,7 +222,7 @@ double GAvg(Grp &g) { return g.lots > 0 ? g.pv / g.lots : 0; }
 void ReadSide(int dir, SideInfo &s)
   {
    bool be = s.be; double bsl = s.beSL; int n0 = s.n;
-   s.n = 0; s.lots = 0; s.avg = 0; s.worst = 0; s.profit = 0;
+   s.n = 0; s.legs = 0; s.lots = 0; s.avg = 0; s.worst = 0; s.best = 0; s.profit = 0;
    double pv = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -218,6 +231,8 @@ void ReadSide(int dir, SideInfo &s)
       s.n++; s.lots += v; pv += v * p;
       s.profit += PL();
       if(s.worst == 0 || (dir == 1 && p < s.worst) || (dir == -1 && p > s.worst)) s.worst = p;
+      if(s.best == 0 || (dir == 1 && p > s.best) || (dir == -1 && p < s.best)) s.best = p;
+      if(StringFind(PositionGetString(POSITION_COMMENT), "LEG") >= 0) s.legs++;
      }
    if(s.lots > 0) s.avg = pv / s.lots;
    s.be = be; s.beSL = bsl;
@@ -302,6 +317,52 @@ string EntryBlock(int dir)
       if(at > 0 && d > InpPullbackATR * at) return StringFormat("price EMA21 se %.1f ATR door", d / at);
      }
    return "";
+  }
+
+// Account ka DD % (balance se equity kitni kam)
+double AcctDDPct()
+  {
+   double b = AccountInfoDouble(ACCOUNT_BALANCE), e = AccountInfoDouble(ACCOUNT_EQUITY);
+   return b > 0 ? MathMax(0.0, (b - e) / b * 100.0) : 0;
+  }
+
+// High-probability score 0-5: H4 trend, ADX >= 25, gehra pullback, RSI momentum zone, London-NY overlap
+int HPScore(int dir)
+  {
+   int sc = 0;
+   double h4 = B1(hH4, 1), h4c = iClose(_Symbol, PERIOD_H4, 1);
+   if(h4 > 0 && ((dir == 1 && h4c > h4) || (dir == -1 && h4c < h4))) sc++;
+   if(B1(hADX, 1) >= 25) sc++;
+   double e = B1(hF, 1), at = B1(hATR, 1), c = iClose(_Symbol, InpSigTF, 1);
+   if(at > 0 && MathAbs(c - e) <= 0.5 * at) sc++;
+   double r = B1(hRSI, 1);
+   if((dir == 1 && r >= 45 && r <= 65) || (dir == -1 && r >= 35 && r <= 55)) sc++;
+   MqlDateTime g; TimeToStruct(TimeCurrent() - InpGMTOffset * 3600, g);
+   if(g.hour >= 12 && g.hour < 16) sc++;
+   return sc;
+  }
+
+double BoostMult(int sc)
+  {
+   if(!rtBoost || mode == MODE_BOTH || AcctDDPct() >= InpBoostMaxDD) return 1.0;
+   if(sc >= 5) return MathMax(1.0, InpBoostMult5);
+   if(sc >= InpBoostScore) return MathMax(1.0, InpBoostMult);
+   return 1.0;
+  }
+
+// Profit me chal rahi side me naya leg (base lot): trend same, HP score acha, DD kam
+bool TryLeg(int dir, SideInfo &s, Grp &h)
+  {
+   if(!rtLegs || mode == MODE_BOTH || s.n == 0 || s.n >= rtMax || h.n > 0 || s.legs >= InpMaxLegs) return false;
+   if(curTrend != dir || s.profit <= 0 || rtTP <= 0 || AcctDDPct() >= InpBoostMaxDD) return false;
+   double px = dir == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double need = InpLegStepTP * rtTP;
+   if((dir == 1 && px < s.best + need) || (dir == -1 && px > s.best - need)) return false;
+   int sc = HPScore(dir);
+   if(sc < InpBoostScore) return false;
+   if(!Open(dir, CurLot(), "LEG")) return false;
+   PrintFormat("%s side profit me (%+.2f), HP %d/5: LEG %d khula", dir == 1 ? "BUY" : "SELL", s.profit, sc, s.legs + 1);
+   return true;
   }
 
 // Capital ke hisaab se lot (AUTO) ya fixed
@@ -712,7 +773,12 @@ void OnTick()
             else wb = EntryBlock(1);
             if(wb == "")
               {
-               if(Open(1, CurLot(), "AUTO")) { lastAuto[0] = TimeCurrent(); wb = "khula"; }
+               int sc = HPScore(1); double mlt = BoostMult(sc);
+               if(Open(1, NormLot(CurLot() * mlt), "AUTO"))
+                 {
+                  lastAuto[0] = TimeCurrent();
+                  wb = mlt > 1.0 ? StringFormat("khula HP %d/5 lot x%.1f", sc, mlt) : StringFormat("khula (HP %d/5)", sc);
+                 }
                else wb = "order fail (Experts tab)";
               }
            }
@@ -724,12 +790,19 @@ void OnTick()
             else ws = EntryBlock(-1);
             if(ws == "")
               {
-               if(Open(-1, CurLot(), "AUTO")) { lastAuto[1] = TimeCurrent(); ws = "khula"; }
+               int sc = HPScore(-1); double mlt = BoostMult(sc);
+               if(Open(-1, NormLot(CurLot() * mlt), "AUTO"))
+                 {
+                  lastAuto[1] = TimeCurrent();
+                  ws = mlt > 1.0 ? StringFormat("khula HP %d/5 lot x%.1f", sc, mlt) : StringFormat("khula (HP %d/5)", sc);
+                 }
                else ws = "order fail (Experts tab)";
               }
            }
          entryWhy = (wantB ? "BUY " + wb : "") + (wantB && wantS ? " | " : "") + (wantS ? "SELL " + ws : "");
         }
+      // profit me chal rahi side me legs (har naye candle par max 1)
+      if(autoOn && roomOK && SessionOK() && (TryLeg(1, SB, HB) || TryLeg(-1, SS, HS))) entryWhy += " | LEG khula";
      }
    Panel();
   }
@@ -867,6 +940,9 @@ void Panel()
    Bt("ca", 6, y, bw, 22, "CLOSE ALL", cS, clrWhite);
    Bt("lotmode", 6 + bw + 4, y, bw, 22, rtAuto ? "LOT: AUTO" : "LOT: FIXED", rtAuto ? cB : cLn, rtAuto ? cBg : cTx);
    OnOff("filt", 6 + 2 * (bw + 4), y, bw, "FILTER", rtFilter);
+   y += 26;
+   OnOff("boost", 6, y, (W - 16) / 2, "HP LOT BOOST", rtBoost);
+   OnOff("legs", 6 + (W - 16) / 2 + 4, y, (W - 16) / 2, "PROFIT LEGS", rtLegs);
    y += 28;
    string lab[5];
    string ids[5] = {"tp", "dca", "lot", "max", "hp"};
@@ -910,6 +986,8 @@ void OnChartEvent(const int id, const long &l, const double &d, const string &sp
    else if(b == "pair") rtPair = !rtPair;
    else if(b == "alock") rtAutoLock = !rtAutoLock;
    else if(b == "filt") rtFilter = !rtFilter;
+   else if(b == "boost") rtBoost = !rtBoost;
+   else if(b == "legs") rtLegs = !rtLegs;
    else if(b == "tpm" || b == "tpp") rtTP = MathMax(0.0, rtTP + (b == "tpp" ? 0.1 : -0.1));
    else if(b == "dcam" || b == "dcap") rtDCA = MathMax(0.5, rtDCA + (b == "dcap" ? 0.5 : -0.5));
    else if(b == "hpm" || b == "hpp") rtHedgePct = MathMax(10.0, MathMin(100.0, rtHedgePct + (b == "hpp" ? 10.0 : -10.0)));
