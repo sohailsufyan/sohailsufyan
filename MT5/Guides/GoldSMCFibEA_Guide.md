@@ -1,4 +1,4 @@
-# Gold SMC Fib EA v1.01: Guide
+# Gold SMC Fib EA v1.02: Guide
 
 XAUUSD ka H1 swing EA. Isme SMC (BOS, liquidity sweep), Fibonacci golden zone aur 11 point ka confluence grade hai. Trade sirf high probability setup par hota hai. Aapke manual trade bhi isi strategy se manage hote hain.
 
@@ -100,19 +100,23 @@ $40 leg, 0.01 lot, fakeout ke baad:
 
 ---
 
-## 3b. Manual trades
+## 3b. Manual trades: aap sirf kholo, baaki EA
 
-Aap khud koi XAUUSD trade kholte ho (magic 0), to EA use bhi isi strategy se manage karta hai:
+Aap XAUUSD par trade kholo (bina SL/TP ke bhi chalega), EA use isi strategy se sambhalega:
 
 | Kya | Rule |
 |---|---|
-| Fib leg | EA ka setup usi direction me ho to wahi leg, warna pichhla H1 swing low/high |
-| SL / TP | Aapne nahi lagaya to EA **Fib SL** (L − $1) aur **Fib TP** (min $15, smart TP) lagayega. Aapka apna SL/TP ho to waisa hi rahega (`InpKeepManualSLTP`). |
-| Breakeven | +$5 → SL average + $0.20 |
-| DCA | 3 × $5, **aapke trade ke lot se**, 0.786 tak |
-| Hedge | 0.786 ke paar H1 close → hedge (aapke lot se, 1 position) |
+| **SL** | Fib leg se (pichhla H1 swing), lekin **kam se kam $5, zyada se zyada $20**. Leg na mile to 1.5 × ATR(H1). |
+| **TP** | Fib extension, lekin **kam se kam $15 aur SL × 1.5**, zyada se zyada $40. Raaste me mazboot liquidity ho to usse $0.50 pehle. |
+| **Breakeven** | +$5 → SL average + $0.20 |
+| **DCA** | 3 × $5, aapke lot se, risk ke 0.786 tak (SL ke $1 paas nahi) |
+| **Hedge** | H1 close risk ke 0.786 ke paar → hedge (aapke lot se, 1 position). SL risk ke 0.5 par + $1 |
+| **BUY + SELL dono khule** | Ye aapka apna hedge hai → sirf SL/TP/breakeven. **DCA aur hedge nahi.** Ek band hote hi doosre par normal management. |
+| **Aapka khud ka SL/TP** | Aapne lagaya ya badla to EA usse nahi chhedta (`InpKeepManualSLTP`). EA sirf apne lagaye SL/TP sambhalta hai. |
 
-Band karna ho to `InpManageManual = false`.
+**Example (BUY 3620.95, SL $20):** SL 3600.95, TP min +$30 (3650.95), 0.786 line 3605.23. DCA 3615.95 / 3610.95 / 3605.95.
+
+Band karna ho to `InpManageManual = false`. Sirf DCA ya hedge band: `InpManualDCA` / `InpManualHedge` = false.
 
 ---
 

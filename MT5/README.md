@@ -244,3 +244,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Liquidity heatmap (12H/1D/3D/1W/1M/ALL), journal CSV, stats panel
 - Guide: `Guides/GoldSMCFibEA_Guide.md`, presets: `Presets/GoldSMCFib/`
 - **v1.01:** equal lows/highs (M15) ka sweep, point 11 = FVG golden zone me, Smart TP (liquidity se $0.50 pehle, min $15), manual trades isi strategy se (Fib SL/TP agar nahi, BE, 3 DCA, hedge), hedge me DCA OFF (sirf 1 position), group close default OFF
+- **v1.02:** manual trades: SL $5–20 (Fib leg, ATR fallback), TP min $15 aur SL×1.5 (max $40), DCA/hedge line risk ke 0.786 par, BUY+SELL dono khule = sirf SL/TP/BE, aapka apna SL/TP EA nahi chhedta, purane manual SL/TP ek baar theek

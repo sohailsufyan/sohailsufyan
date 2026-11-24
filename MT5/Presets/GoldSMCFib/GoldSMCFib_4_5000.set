@@ -1,4 +1,4 @@
-; GoldSMCFibEA v1.01 - $5,000 account (XAUUSD, H1 chart, Vantage/Exness dono)
+; GoldSMCFibEA v1.02 - $5,000 account (XAUUSD, H1 chart, Vantage/Exness dono)
 InpLotMode=0
 InpLot=0.05
 InpRiskPct=1.0
@@ -102,3 +102,7 @@ InpManageManual=true
 InpKeepManualSLTP=true
 InpManualDCA=true
 InpManualHedge=true
+InpManualMinSLUSD=5.0
+InpManualMaxSLUSD=20.0
+InpManualMinRR=1.5
+InpManualMaxTPUSD=40.0
