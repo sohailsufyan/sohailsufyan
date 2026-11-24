@@ -84,7 +84,7 @@ Level(f) = H − f × (H − L)        (BUY)
 | **TP** | Fib 1.272. Strong trend (H1 + H4 EMA stack) me 1.618. Kam se kam **$15**. |
 | **Smart TP** | TP se pehle raaste me mazboot liquidity ho (equal highs/lows, POC, PDH/PWH/1M/3M/6M/Y) to TP usse **$0.50 pehle**, lekin $15 se kam nahi |
 | **Breakeven** | Average se **+$5** → saari positions ka SL **average + $0.20** |
-| **DCA** | Har **$5 ulta**, max **3**, wahi lot, **turant** (candle close nahi). 0.786 ke paar DCA nahi. |
+| **DCA** | Har **$5 ulta**, **poore setup me max 3** (entry + re-entry milakar), wahi lot, **turant** (candle close nahi). 0.786 ke paar DCA nahi. Panel par `DCA x/3`. |
 | **Fakeout hedge** | H1 candle 0.786 ke paar close → ulti taraf **hedge** (fixed lot, sirf **1 position**). SL 0.5 ke paar + $1, TP ulti taraf 1.272 (min $15). Breakeven hai, **DCA nahi** (`InpHedgeDCA = false`). |
 | **Group close** | Default **OFF**: main aur hedge apne SL/TP se band hote hain. ON karoge (`InpGroupClose`) to total +$1 par sab band. |
 | **Re-entry** | Trade breakeven par band hua aur setup abhi valid hai → **M15** candle trend ki taraf close ho → dobara entry. Ek setup me max **2**. |

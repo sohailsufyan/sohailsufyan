@@ -16,7 +16,7 @@
 //   5. SL = Fib 1.0 (L) se $1 aage. TP = Fib 1.272 (strong trend 1.618), kam se kam $15.
 //      Smart TP: raaste me mazboot liquidity (equal highs/lows, POC, bada level) ho to usse $0.50 pehle.
 //   6. Average se +$5 -> saari positions ka SL = average + $0.20.
-//   7. DCA: har $5 ulta, max 3, wahi fixed lot, turant (candle close nahi), 0.786 ke paar nahi.
+//   7. DCA: har $5 ulta, poore setup me max 3 (re-entry milakar), wahi lot, turant, 0.786 ke paar nahi.
 //   8. Fakeout: H1 candle 0.786 ke paar close -> hedge (fixed lot). Hedge SL = 0.5 ke paar + $1,
 //      TP = ulti taraf 1.272 (min $15). Hedge me breakeven hai, DCA default OFF (sirf 1 position).
 //   9. Group close (option): main + hedge ka total >= +$1 -> sab band. Default OFF: dono apne SL/TP se.
@@ -95,7 +95,7 @@ input double          InpBELockUSD      = 0.20;        // Breakeven SL = average
 
 input group "=== DCA (turant, candle close nahi) ==="
 input bool            InpDCA            = true;        // DCA ON
-input int             InpDCAMax         = 3;           // Max DCA per basket
+input int             InpDCAMax         = 3;           // Max DCA ek setup me (entry + re-entry milakar)
 input double          InpDCAStepUSD     = 5.0;         // Aakhri position se itna $ ulta = DCA
 
 input group "=== Fakeout hedge ==="
@@ -181,7 +181,7 @@ struct SetupT
    int      dir;
    double   L, H;
    bool     touched, entered, hedgeDone, reArmed;
-   int      reent, score;
+   int      reent, score, dcaUsed;
    datetime bosTime;
    double   extreme, tp, sl;
    string   grade, why;
@@ -453,7 +453,7 @@ void CloseKind(int kind)
 void ResetSetup()
   {
    S.act = false; S.dir = 0; S.L = 0; S.H = 0; S.touched = false; S.entered = false; S.hedgeDone = false;
-   S.reArmed = false; S.reent = 0; S.score = 0; S.bosTime = 0; S.extreme = 0; S.tp = 0; S.sl = 0;
+   S.reArmed = false; S.reent = 0; S.score = 0; S.dcaUsed = 0; S.bosTime = 0; S.extreme = 0; S.tp = 0; S.sl = 0;
    S.grade = "-"; S.why = "";
   }
 
@@ -465,6 +465,7 @@ void SaveState()
    GlobalVariableSet(gv + "tch", S.touched ? 1 : 0); GlobalVariableSet(gv + "ent", S.entered ? 1 : 0);
    GlobalVariableSet(gv + "hdg", S.hedgeDone ? 1 : 0); GlobalVariableSet(gv + "rea", S.reArmed ? 1 : 0);
    GlobalVariableSet(gv + "ren", S.reent);          GlobalVariableSet(gv + "sco", S.score);
+   GlobalVariableSet(gv + "dcu", S.dcaUsed);
    GlobalVariableSet(gv + "bos", (double)(long)S.bosTime); GlobalVariableSet(gv + "ext", S.extreme);
    GlobalVariableSet(gv + "tp", S.tp);              GlobalVariableSet(gv + "sl", S.sl);
    GlobalVariableSet(gv + "dS", (double)(long)dayStart); GlobalVariableSet(gv + "dEq", dayStartEq);
@@ -486,6 +487,7 @@ void LoadState()
    S.touched = GlobalVariableGet(gv + "tch") > 0.5; S.entered = GlobalVariableGet(gv + "ent") > 0.5;
    S.hedgeDone = GlobalVariableGet(gv + "hdg") > 0.5; S.reArmed = GlobalVariableGet(gv + "rea") > 0.5;
    S.reent = (int)GlobalVariableGet(gv + "ren"); S.score = (int)GlobalVariableGet(gv + "sco");
+   S.dcaUsed = GlobalVariableCheck(gv + "dcu") ? (int)GlobalVariableGet(gv + "dcu") : 0;
    S.bosTime = (datetime)(long)GlobalVariableGet(gv + "bos"); S.extreme = GlobalVariableGet(gv + "ext");
    S.tp = GlobalVariableGet(gv + "tp");           S.sl = GlobalVariableGet(gv + "sl");
    S.grade = GradeName(S.score);
@@ -1229,6 +1231,7 @@ void ManageDCA(Basket &b, int kind)
    bool manual = kind == K_MANB || kind == K_MANS || kind == K_MHB || kind == K_MHS;
    if(manual && !InpManualDCA) return;
    if(!InpHedgeDCA && (kind == K_HEDGE || kind == K_MHB || kind == K_MHS)) return;   // hedge me DCA nahi
+   if(kind == K_MAIN && S.act && S.dcaUsed >= InpDCAMax) return;                    // poore setup me max DCA (re-entry milakar)
    int d = b.dir;
    double bid = Bid(), ask = Ask();
    if(!(d == 1 ? ask <= b.worst - InpDCAStepUSD : bid >= b.worst + InpDCAStepUSD)) return;
@@ -1240,7 +1243,12 @@ void ManageDCA(Basket &b, int kind)
    if(Spread() > InpMaxSpreadUSD) return;
    double lot = b.firstLot > 0 ? NormLot(b.firstLot) : NormLot(rtLot);
    string pre = kind == K_HEDGE ? "SFE HD" : (kind == K_MAIN ? "SFE D" : (kind == K_MHB ? "SFE MHB" : (kind == K_MHS ? "SFE MHS" : "SFE MD")));
-   SendOrder(d, lot, b.sl, b.tp, pre + IntegerToString(b.n));
+   if(SendOrder(d, lot, b.sl, b.tp, pre + IntegerToString(b.n)) && kind == K_MAIN && S.act)
+     {
+      S.dcaUsed++;
+      PrintFormat("DCA %d/%d (is setup me)", S.dcaUsed, InpDCAMax);
+      SaveState();
+     }
   }
 
 //==================== MANUAL TRADES (isi strategy se) ====================
@@ -1746,8 +1754,8 @@ void Panel()
    Tx("s1", 10, y, StringFormat("Stats: %d trade | Win %.0f%% | A+ %d (%.0f%%) | A++ %d (%.0f%%)", stTotal, wr,
       stAP, stAP > 0 ? 100.0 * stAPW / stAP : 0, stAPP, stAPP > 0 ? 100.0 * stAPPW / stAPP : 0), cDm);
    y += 16;
-   Tx("s2", 10, y, StringFormat("Avg jeet %+.2f | Avg haar %+.2f | Re-entry %d/%d | Lagatar loss %d",
-      stNW > 0 ? stSumW / stNW : 0, stNL > 0 ? stSumL / stNL : 0, S.reent, InpReEntryMax, consecLoss), cDm);
+   Tx("s2", 10, y, StringFormat("Avg jeet %+.2f | Avg haar %+.2f | DCA %d/%d | Re-entry %d/%d | Lagatar loss %d",
+      stNW > 0 ? stSumW / stNW : 0, stNL > 0 ? stSumL / stNL : 0, S.dcaUsed, InpDCAMax, S.reent, InpReEntryMax, consecLoss), cDm);
    y += 20;
    int bw = (W - 12 - 8) / 3;
    Bt("on", 6, y, bw, 22, rtOn ? "EA: ON" : "EA: OFF", rtOn ? cB : cLn, rtOn ? cBg : cTx);
