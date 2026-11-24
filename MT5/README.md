@@ -245,3 +245,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Guide: `Guides/GoldSMCFibEA_Guide.md`, presets: `Presets/GoldSMCFib/`
 - **v1.01:** equal lows/highs (M15) ka sweep, point 11 = FVG golden zone me, Smart TP (liquidity se $0.50 pehle, min $15), manual trades isi strategy se (Fib SL/TP agar nahi, BE, 3 DCA, hedge), hedge me DCA OFF (sirf 1 position), group close default OFF
 - **v1.02:** manual trades: SL $5–20 (Fib leg, ATR fallback), TP min $15 aur SL×1.5 (max $40), DCA/hedge line risk ke 0.786 par, BUY+SELL dono khule = sirf SL/TP/BE, aapka apna SL/TP EA nahi chhedta, purane manual SL/TP ek baar theek
+- **v1.03:** manual trades bilkul EA jaisa: Fib SL (1.0 ± $1), Fib TP (1.272 / 1.618, min $15), DCA 3 × $5 aapke lot se aur BUY+SELL dono side, 0.786 hedge (SL 0.5 + $1, TP 1.272). $5–20 seema ab option (`InpManualLimits`, default OFF)

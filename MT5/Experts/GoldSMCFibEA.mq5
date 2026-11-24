@@ -23,14 +23,14 @@
 //  10. Breakeven par band hua aur setup valid -> M15 candle close confirmation par re-entry (max 2).
 //  11. Limits: din me max 8 trade, daily SL $, daily target, lagatar loss, weekly loss, equity stop.
 //  12. Liquidity heatmap (12H / 1D / 3D / 1W / 1M / ALL), journal CSV + stats panel.
-//  13. Manual trades (magic 0): aap sirf kholo, baaki EA. SL = Fib (min $5, max $20), TP min $15 aur
-//      SL x 1.5, breakeven, 3 DCA x $5, risk ke 0.786 par fakeout hedge. BUY + SELL dono khule
-//      (aapka hedge) = sirf SL/TP/breakeven, DCA aur hedge nahi.
+//  13. Manual trades (magic 0): aap sirf kholo, baaki EA bilkul apni strategy se: Fib SL (1.0 - $1),
+//      Fib TP (1.272 / 1.618, min $15), breakeven, 3 DCA x $5 (aapke lot se, BUY aur SELL dono side),
+//      0.786 fakeout hedge. BUY + SELL dono khule hon to hedge nahi (aapka apna hedge hai).
 //  KABHI NAHI: doosre EA ke trade nahi chhedta, lot double nahi karta (DCA fixed lot).
 //  RISK: DCA + hedge se ek setup me 8 position tak ho sakti hain. Daily SL limit zaroor rakho.
 //+------------------------------------------------------------------+
 #property copyright "GoldSMCFibEA"
-#property version   "1.02"
+#property version   "1.03"
 #property description "XAUUSD H1: SMC + Fibonacci golden zone + confluence grade"
 
 #include <Trade/Trade.mqh>
@@ -159,10 +159,11 @@ input bool            InpManageManual   = true;        // Manual trades (magic 0
 input bool            InpKeepManualSLTP = true;        // Manual ka apna SL/TP ho to waisa hi rahe (nahi ho to EA Fib SL/TP lagaye)
 input bool            InpManualDCA      = true;        // Manual trade par DCA (3 x $5, manual lot)
 input bool            InpManualHedge    = true;        // Manual trade par 0.786 fakeout hedge
-input double          InpManualMinSLUSD = 5.0;         // Manual SL kam se kam itna $ door
-input double          InpManualMaxSLUSD = 20.0;        // Manual SL zyada se zyada itna $ door
-input double          InpManualMinRR    = 1.5;         // Manual TP kam se kam SL x itna (aur min $15)
-input double          InpManualMaxTPUSD = 40.0;        // Manual TP zyada se zyada itna $ door
+input bool            InpManualLimits   = false;       // Manual SL/TP par seema lagao (OFF = bilkul EA jaisa Fib)
+input double          InpManualMinSLUSD = 5.0;         // Seema ON: manual SL kam se kam itna $ door
+input double          InpManualMaxSLUSD = 20.0;        // Seema ON: manual SL zyada se zyada itna $ door
+input double          InpManualMinRR    = 1.5;         // Seema ON: manual TP kam se kam SL x itna (aur min $15)
+input double          InpManualMaxTPUSD = 40.0;        // Seema ON: manual TP zyada se zyada itna $ door
 
 input group "=== Journal / panel ==="
 input bool            InpJournal        = true;        // Har closed trade CSV me (MQL5/Files)
@@ -193,10 +194,10 @@ struct SetupT
   };
 SetupT   S;
 
-struct Basket { int n, dir; double lots, pv, profit, worst, sl, tp, firstLot; };
+struct Basket { int n, dir, dcaN; double lots, pv, profit, worst, sl, tp, firstLot; };
 Basket   MB, HB;   // MB = main (setup direction), HB = hedge
 Basket   MMB[2], MHB[2];   // manual basket (0 = BUY, 1 = SELL) aur uska hedge
-struct ManCtx { bool act, hedgeDone; double entry, D, sl, tp, line, hsl; };
+struct ManCtx { bool act, hedgeDone; double entry, D, sl, tp, line, hsl, L, H; };
 bool     forceManualOnce = false;   // purane version ke manual SL/TP ek baar theek karne ke liye
 ManCtx   MC[2];
 #define  K_MAIN  0
@@ -268,7 +269,7 @@ int OnInit()
    gv = "SFE_" + _Symbol + "_" + IntegerToString(InpMagic) + "_";
    ResetSetup();
    for(int k = 0; k < 2; k++) ZeroMC(k);
-   forceManualOnce = !MQLInfoInteger(MQL_TESTER) && !GlobalVariableCheck(gv + "mv2");
+   forceManualOnce = !MQLInfoInteger(MQL_TESTER) && !GlobalVariableCheck(gv + "mv3");
    LoadState();
    ReadBaskets();
    prevMainN = MB.n;
@@ -396,7 +397,7 @@ void CloseAll(string why)
   }
 
 //==================== BASKETS ====================
-void ZeroB(Basket &b) { b.n = 0; b.dir = 0; b.lots = 0; b.pv = 0; b.profit = 0; b.worst = 0; b.sl = 0; b.tp = 0; b.firstLot = 0; }
+void ZeroB(Basket &b) { b.n = 0; b.dir = 0; b.dcaN = 0; b.lots = 0; b.pv = 0; b.profit = 0; b.worst = 0; b.sl = 0; b.tp = 0; b.firstLot = 0; }
 double Avg(Basket &b) { return b.lots > 0 ? b.pv / b.lots : 0; }
 
 void AddB(Basket &b, int d, double v, double op, double pr, double sl, double tp)
@@ -428,6 +429,7 @@ void ReadBaskets()
   {
    ZeroB(MB); ZeroB(HB);
    for(int k = 0; k < 2; k++) { ZeroB(MMB[k]); ZeroB(MHB[k]); }
+   datetime uT[2] = {0, 0};   // aapka sabse purana manual trade (DCA / hedge lot isi ka)
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(PositionGetTicket(i) == 0) continue;
@@ -439,8 +441,17 @@ void ReadBaskets()
       double sl = PositionGetDouble(POSITION_SL), tp = PositionGetDouble(POSITION_TP);
       if(kind == K_MAIN)       AddB(MB, d, v, op, pr, sl, tp);
       else if(kind == K_HEDGE) AddB(HB, d, v, op, pr, sl, tp);
-      else if(kind == K_MANB)  AddB(MMB[0], d, v, op, pr, sl, tp);
-      else if(kind == K_MANS)  AddB(MMB[1], d, v, op, pr, sl, tp);
+      else if(kind == K_MANB || kind == K_MANS)
+        {
+         int k = kind == K_MANB ? 0 : 1;
+         AddB(MMB[k], d, v, op, pr, sl, tp);
+         if(PositionGetInteger(POSITION_MAGIC) != 0) MMB[k].dcaN++;   // EA ka manual DCA
+         else
+           {
+            datetime ot = (datetime)PositionGetInteger(POSITION_TIME);
+            if(uT[k] == 0 || ot < uT[k]) { uT[k] = ot; MMB[k].firstLot = v; }
+           }
+        }
       else if(kind == K_MHB)   AddB(MHB[0], d, v, op, pr, sl, tp);
       else if(kind == K_MHS)   AddB(MHB[1], d, v, op, pr, sl, tp);
      }
@@ -485,6 +496,7 @@ void SaveState()
       GlobalVariableSet(m + "e", MC[k].entry);       GlobalVariableSet(m + "D", MC[k].D);
       GlobalVariableSet(m + "s", MC[k].sl);          GlobalVariableSet(m + "t", MC[k].tp);
       GlobalVariableSet(m + "l", MC[k].line);        GlobalVariableSet(m + "x", MC[k].hsl);
+      GlobalVariableSet(m + "L", MC[k].L);           GlobalVariableSet(m + "H", MC[k].H);
      }
   }
 
@@ -511,11 +523,13 @@ void LoadState()
      {
       string m = gv + "m" + IntegerToString(k);
       if(!GlobalVariableCheck(m + "a")) continue;
-      if(!GlobalVariableCheck(m + "D")) continue;      // purana version: dobara adopt hoga
+      if(forceManualOnce || !GlobalVariableCheck(m + "D")) continue;   // naya version: manual dobara adopt hoga
       MC[k].act = GlobalVariableGet(m + "a") > 0.5;  MC[k].hedgeDone = GlobalVariableGet(m + "h") > 0.5;
       MC[k].entry = GlobalVariableGet(m + "e");     MC[k].D = GlobalVariableGet(m + "D");
       MC[k].sl = GlobalVariableGet(m + "s");        MC[k].tp = GlobalVariableGet(m + "t");
       MC[k].line = GlobalVariableGet(m + "l");      MC[k].hsl = GlobalVariableGet(m + "x");
+      MC[k].L = GlobalVariableCheck(m + "L") ? GlobalVariableGet(m + "L") : 0;
+      MC[k].H = GlobalVariableCheck(m + "H") ? GlobalVariableGet(m + "H") : 0;
       if(MC[k].act && MC[k].D <= 0) ZeroMC(k);
      }
    if(S.act && (S.dir == 0 || S.H <= S.L)) ResetSetup();
@@ -1242,8 +1256,10 @@ string KindName(int kind)
 
 void ManageDCA(Basket &b, int kind)
   {
-   if(!InpDCA || !rtOn || b.n == 0 || b.n - 1 >= InpDCAMax) return;
    bool manual = kind == K_MANB || kind == K_MANS || kind == K_MHB || kind == K_MHS;
+   bool manMain = kind == K_MANB || kind == K_MANS;
+   if(!InpDCA || !rtOn || b.n == 0) return;
+   if(manMain ? b.dcaN >= InpDCAMax : b.n - 1 >= InpDCAMax) return;   // manual me sirf EA ke DCA gine
    if(manual && !InpManualDCA) return;
    if(!InpHedgeDCA && (kind == K_HEDGE || kind == K_MHB || kind == K_MHS)) return;   // hedge me DCA nahi
    if(kind == K_MAIN && S.act && S.dcaUsed >= InpDCAMax) return;                    // poore setup me max DCA (re-entry milakar)
@@ -1254,7 +1270,6 @@ void ManageDCA(Basket &b, int kind)
    if(kind == K_MAIN && S.act && S.dir == d) zi = Fib(InpInvalidFib);
    if(kind == K_MANB && MC[0].act) zi = MC[0].line;
    if(kind == K_MANS && MC[1].act) zi = MC[1].line;
-   if((kind == K_MANB || kind == K_MANS) && MMB[0].n > 0 && MMB[1].n > 0) return;   // BUY + SELL dono khule = aapka hedge, DCA nahi
    if(b.sl > 0 && (d == 1 ? bid - b.sl : b.sl - ask) < 1.0) return;                 // SL ke bahut paas DCA nahi
    if(zi > 0 && (d == 1 ? bid <= zi : ask >= zi)) return;      // 0.786 ke paar DCA nahi
    if(Spread() > InpMaxSpreadUSD) return;
@@ -1297,7 +1312,7 @@ bool ManualLeg(int d, double entry, double &L, double &H)
 void ZeroMC(int k)
   {
    MC[k].act = false; MC[k].hedgeDone = false; MC[k].entry = 0; MC[k].D = 0;
-   MC[k].sl = 0; MC[k].tp = 0; MC[k].line = 0; MC[k].hsl = 0;
+   MC[k].sl = 0; MC[k].tp = 0; MC[k].line = 0; MC[k].hsl = 0; MC[k].L = 0; MC[k].H = 0;
   }
 
 // EA ne jo SL/TP lagaya use yaad rakho (aapka khud ka SL/TP alag pehchanne ke liye)
@@ -1310,35 +1325,48 @@ void RememberSLTP(ulong t, double sl, double tp)   // -1 = us value ko yaad mat 
 bool EASetSL(ulong t, double cur) { string n = gv + "P" + IntegerToString((long)t) + "s"; return GlobalVariableCheck(n) && MathAbs(GlobalVariableGet(n) - cur) < 10 * _Point; }
 bool EASetTP(ulong t, double cur) { string n = gv + "P" + IntegerToString((long)t) + "t"; return GlobalVariableCheck(n) && MathAbs(GlobalVariableGet(n) - cur) < 10 * _Point; }
 
-// Manual trade apna: SL = Fib leg se (min $5, max $20, ATR fallback), TP = Fib (min $15 aur SL x 1.5, max $40)
+// Manual trade: bilkul EA jaisa Fib. SL = leg 1.0 -/+ $1, TP = 1.272 / 1.618 (min $15),
+// DCA band + hedge = 0.786 line, hedge SL = 0.5 + $1. Leg na mile to ATR. InpManualLimits ON = SL $5-20.
 void AdoptManual(int k)
   {
    int d = k == 0 ? 1 : -1;
-   double entry = Avg(MMB[k]), L = 0, H = 0, slDist = 0, tpDist = 0;
-   if(ManualLeg(d, entry, L, H))
+   double entry = Avg(MMB[k]), L = 0, H = 0, slDist = 0, tp = 0;
+   bool leg = ManualLeg(d, entry, L, H);
+   if(leg)
      {
       slDist = d == 1 ? entry - (L - InpSLBufferUSD) : (H + InpSLBufferUSD) - entry;
       double R = H - L, ext = StrongTrend(d) ? InpTPExtStrong : InpTPExt;
-      double fibTP = d == 1 ? H + (ext - 1.0) * R : L - (ext - 1.0) * R;
-      tpDist = d * (fibTP - entry);
+      double fibTP = d == 1 ? H + (ext - 1.0) * R : L - (ext - 1.0) * R, minTP = entry + d * InpTPMinUSD;
+      tp = SmartTP(d, entry, d == 1 ? MathMax(fibTP, minTP) : MathMin(fibTP, minTP));
+      MC[k].line = FibOf(d, L, H, InpInvalidFib);
+      MC[k].hsl = FibOf(d, L, H, InpZoneTop) + d * InpHedgeSLBufUSD;
      }
-   if(slDist <= 0)
+   if(!leg || slDist <= 0)
      {
       double atr = Buf(hATR, 0, 1);
-      slDist = (atr != EMPTY_VALUE && atr > 0) ? 1.5 * atr : InpManualMaxSLUSD;
+      slDist = (atr != EMPTY_VALUE && atr > 0) ? 1.5 * atr : 20.0;
+      tp = SmartTP(d, entry, entry + d * MathMax(InpTPMinUSD, slDist * 1.5));
+      leg = false;
      }
-   slDist = MathMax(InpManualMinSLUSD, MathMin(InpManualMaxSLUSD, slDist));
-   double minTPd = MathMax(InpTPMinUSD, slDist * InpManualMinRR);
-   tpDist = MathMax(minTPd, MathMin(InpManualMaxTPUSD, tpDist));
-   double tp = SmartTP(d, entry, entry + d * tpDist);
-   if(d * (tp - entry) < minTPd) tp = entry + d * minTPd;
+   if(InpManualLimits)
+     {
+      slDist = MathMax(InpManualMinSLUSD, MathMin(InpManualMaxSLUSD, slDist));
+      double minTPd = MathMax(InpTPMinUSD, slDist * InpManualMinRR), td = d * (tp - entry);
+      td = MathMax(minTPd, MathMin(InpManualMaxTPUSD, td));
+      tp = entry + d * td;
+      leg = false;   // seema lagi to lines risk se
+     }
+   if(!leg)
+     {
+      MC[k].line = entry - d * InpInvalidFib * slDist;
+      MC[k].hsl = entry - d * InpZoneTop * slDist + d * InpHedgeSLBufUSD;
+      L = 0; H = 0;
+     }
    MC[k].act = true; MC[k].hedgeDone = false;
-   MC[k].entry = entry; MC[k].D = slDist;
+   MC[k].entry = entry; MC[k].D = slDist; MC[k].L = L; MC[k].H = H;
    MC[k].sl = NP(entry - d * slDist); MC[k].tp = NP(tp);
-   MC[k].line = entry - d * InpInvalidFib * slDist;                       // risk ka 0.786 = fakeout line
-   MC[k].hsl = entry - d * InpZoneTop * slDist + d * InpHedgeSLBufUSD;    // hedge ka SL (risk ka 0.5 + $1)
-   PrintFormat("MANUAL %s adopt: entry %.2f | SL %.2f (-$%.2f) | TP %.2f (+$%.2f) | 0.786 line %.2f",
-               d == 1 ? "BUY" : "SELL", entry, MC[k].sl, slDist, MC[k].tp, d * (MC[k].tp - entry), MC[k].line);
+   PrintFormat("MANUAL %s adopt: entry %.2f | SL %.2f (-$%.2f) | TP %.2f (+$%.2f) | 0.786 line %.2f%s",
+               d == 1 ? "BUY" : "SELL", entry, MC[k].sl, slDist, MC[k].tp, d * (MC[k].tp - entry), MC[k].line, leg ? " (Fib leg)" : " (ATR/seema)");
    SaveState();
   }
 
@@ -1400,12 +1428,9 @@ void ManageManual(int k, bool newH1)
      }
    ManageBE(MMB[k], kind);
    ManageBE(MHB[k], hkind);
-   if(!both)
-     {
-      ManageDCA(MMB[k], kind);
-      ManageDCA(MHB[k], hkind);
-     }
-   //--- fakeout hedge: H1 close risk ke 0.786 ke paar (aapka lot). BUY + SELL dono khule hon to nahi
+   ManageDCA(MMB[k], kind);    // BUY aur SELL dono side DCA (EA jaisa)
+   ManageDCA(MHB[k], hkind);
+   //--- fakeout hedge: H1 close 0.786 ke paar (aapka lot). BUY + SELL dono khule hon to nahi (aapka apna hedge)
    if(newH1 && !both && InpManualHedge && rtOn && !MC[k].hedgeDone && MHB[k].n == 0)
      {
       double c1 = iClose(_Symbol, PERIOD_H1, 1);
@@ -1414,8 +1439,15 @@ void ManageManual(int k, bool newH1)
          int hd = -d;
          double px = hd == 1 ? Ask() : Bid();
          double hsl = MC[k].hsl;
-         double risk = MathAbs(px - hsl);
-         double htp = SmartTP(hd, px, px + hd * MathMax(InpTPMinUSD, risk * InpManualMinRR));
+         double minTP = px + hd * MathMax(InpTPMinUSD, MathAbs(px - hsl) * 1.5), htp0 = minTP;
+         if(MC[k].H > MC[k].L)   // Fib leg: hedge TP ulti taraf 1.272 (EA jaisa)
+           {
+            double R = MC[k].H - MC[k].L;
+            double fibTP = d == 1 ? MC[k].L - (InpHedgeExt - 1.0) * R : MC[k].H + (InpHedgeExt - 1.0) * R;
+            minTP = px + hd * InpTPMinUSD;
+            htp0 = hd == -1 ? MathMin(fibTP, minTP) : MathMax(fibTP, minTP);
+           }
+         double htp = SmartTP(hd, px, htp0);
          PrintFormat("MANUAL FAKEOUT: H1 close %.2f, 0.786 line (%.2f) ke paar -> HEDGE", c1, MC[k].line);
          if(SendOrder(hd, NormLot(MMB[k].firstLot), hsl, htp, k == 0 ? "SFE MHB" : "SFE MHS")) { MC[k].hedgeDone = true; SaveState(); }
         }
@@ -1506,7 +1538,7 @@ void OnTick()
    bool newH1 = h1t != lastH1 && h1t > 0;
    ManageManual(0, newH1);
    ManageManual(1, newH1);
-   if(forceManualOnce) { forceManualOnce = false; if(!MQLInfoInteger(MQL_TESTER)) GlobalVariableSet(gv + "mv2", 1); }
+   if(forceManualOnce) { forceManualOnce = false; if(!MQLInfoInteger(MQL_TESTER)) GlobalVariableSet(gv + "mv3", 1); }
    if(newH1)
      {
       lastH1 = h1t;
@@ -1786,7 +1818,7 @@ void Panel()
    lastDraw = TimeLocal();
    int W = 380, y = 6;
    Rc("bg", 0, 0, W, 100, cBg);
-   Tx("ti", 10, y, "GOLD SMC FIB EA  v1.02", cTx, 10, true);
+   Tx("ti", 10, y, "GOLD SMC FIB EA  v1.03", cTx, 10, true);
    Tx("on", W - 70, y + 2, rtOn ? "RUNNING" : "OFF", rtOn ? cB : cS, 8, true);
    y += 20;
    int h4 = EmaStack(h4E1, h4E2, h4E3, h4E4, PERIOD_H4, false);

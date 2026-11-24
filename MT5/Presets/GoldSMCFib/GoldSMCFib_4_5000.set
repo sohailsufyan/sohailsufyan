@@ -102,6 +102,7 @@ InpManageManual=true
 InpKeepManualSLTP=true
 InpManualDCA=true
 InpManualHedge=true
+InpManualLimits=false
 InpManualMinSLUSD=5.0
 InpManualMaxSLUSD=20.0
 InpManualMinRR=1.5
