@@ -85,7 +85,7 @@ Level(f) = H − f × (H − L)        (BUY)
 | **Smart TP** | TP se pehle raaste me mazboot liquidity ho (equal highs/lows, POC, PDH/PWH/1M/3M/6M/Y) to TP usse **$0.50 pehle**, lekin $15 se kam nahi |
 | **Breakeven** | Average se **+$5** → saari positions ka SL **average + $0.20** |
 | **DCA** | Har **$5 ulta**, max **3**, wahi lot, **turant** (candle close nahi). 0.786 ke paar DCA nahi. |
-| **Fakeout hedge** | H1 candle 0.786 ke paar close → ulti taraf **hedge** (fixed lot, sirf **1 position**). SL 0.5 ke paar + $1, TP ulti taraf 1.272 (min $15). Breakeven aur **max 3 DCA × $5** (`InpHedgeDCA`, OFF karoge to sirf 1 position). |
+| **Fakeout hedge** | H1 candle 0.786 ke paar close → ulti taraf **hedge** (fixed lot, sirf **1 position**). SL 0.5 ke paar + $1, TP ulti taraf 1.272 (min $15). Breakeven hai, **DCA nahi** (`InpHedgeDCA = false`). |
 | **Group close** | Default **OFF**: main aur hedge apne SL/TP se band hote hain. ON karoge (`InpGroupClose`) to total +$1 par sab band. |
 | **Re-entry** | Trade breakeven par band hua aur setup abhi valid hai → **M15** candle trend ki taraf close ho → dobara entry. Ek setup me max **2**. |
 
@@ -110,7 +110,7 @@ Aap khud koi XAUUSD trade kholte ho (magic 0), to EA use bhi isi strategy se man
 | SL / TP | Aapne nahi lagaya to EA **Fib SL** (L − $1) aur **Fib TP** (min $15, smart TP) lagayega. Aapka apna SL/TP ho to waisa hi rahega (`InpKeepManualSLTP`). |
 | Breakeven | +$5 → SL average + $0.20 |
 | DCA | 3 × $5, **aapke trade ke lot se**, 0.786 tak |
-| Hedge | 0.786 ke paar H1 close → hedge (aapke lot se), uske bhi max 3 DCA |
+| Hedge | 0.786 ke paar H1 close → hedge (aapke lot se, 1 position) |
 
 Band karna ho to `InpManageManual = false`.
 
@@ -147,7 +147,7 @@ Gold me **0.01 lot = $1 move par $1**.
 | $5,000 | 0.05 | $250 | `GoldSMCFib_4_5000.set` |
 | $10,000 | 0.10 | $500 | `GoldSMCFib_5_10000.set` |
 
-Ek setup me sabse zyada **8 position** ho sakti hain: (entry + 3 DCA) + (hedge + 3 DCA). Isliye lot chhota rakho aur **Daily SL limit** hamesha ON rakho.
+Ek setup me sabse zyada **5 position** ho sakti hain: entry + 3 DCA + 1 hedge. Isliye lot chhota rakho aur **Daily SL limit** hamesha ON rakho.
 
 ---
 
