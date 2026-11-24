@@ -233,3 +233,13 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 # BTCHedgeScalper (`Experts/BTCHedgeScalper.mq5`) – same as GoldHedgeScalper, BTCUSD ke liye
 - TP +$30 har trade, DCA $150, breakeven +$40 → average + $20, max spread $30, session filter OFF (24/7), magic 777666
 - Panel steps: TP ±$5, DCA ±$25; lot AUTO (0.01 / $1000) ya FIXED
+
+# GoldSMCFibEA (`Experts/GoldSMCFibEA.mq5`) – XAUUSD H1 swing (SMC + Fibonacci)
+- Trend H1 = structure (HH/HL) + EMA 21/34/50/200; UP = sirf BUY, DOWN = sirf SELL, side-ways = no trade
+- H1 BOS → impulse leg → 0.5–0.7 golden zone pullback → H1 close confirmation (0.618 ke paar close, 0.786 ke paar nahi)
+- 10-point confluence grade (H4, D/3D, W/big levels, EMA, RSI(7) div, RSI zone, StochRSI, volume, sweep, MACD) → A / A+ / A++, min grade input
+- SL Fib 1.0 − $1, TP 1.272 (strong trend 1.618) min $15, BE +$5 → +$0.20, DCA 3 × $5 (turant, 0.786 tak)
+- Fakeout: H1 close 0.786 ke paar → fixed-lot hedge (SL 0.5 ke paar, TP ulta 1.272); main + hedge ≥ +$1 → group close
+- Re-entry (BE ke baad) M15 close confirmation, max 2; limits: 7 trade/din, daily SL $, target, lagatar loss, weekly, equity stop
+- Liquidity heatmap (12H/1D/3D/1W/1M/ALL), journal CSV, stats panel
+- Guide: `Guides/GoldSMCFibEA_Guide.md`, presets: `Presets/GoldSMCFib/`
