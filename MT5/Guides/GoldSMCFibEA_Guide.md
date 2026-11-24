@@ -1,6 +1,6 @@
-# Gold SMC Fib EA v1.00: Guide
+# Gold SMC Fib EA v1.01: Guide
 
-XAUUSD ka H1 swing EA. Isme SMC (BOS, liquidity sweep), Fibonacci golden zone aur 10 point ka confluence grade hai. Trade sirf high probability setup par hota hai.
+XAUUSD ka H1 swing EA. Isme SMC (BOS, liquidity sweep), Fibonacci golden zone aur 11 point ka confluence grade hai. Trade sirf high probability setup par hota hai. Aapke manual trade bhi isi strategy se manage hote hain.
 
 > ⚠️ Pehle **demo** par kam se kam 1–2 hafte chalao. Koi bhi EA profit ki guarantee nahi deta.
 
@@ -51,7 +51,7 @@ Level(f) = H − f × (H − L)        (BUY)
 - Hari candle ho, ya pin bar (neeche ka wick body ka 2 guna)
 - Sirf **pehla pullback**
 
-### Step 5: Grade (10 point)
+### Step 5: Grade (11 point)
 | # | Point | Kab milta hai |
 |---|---|---|
 | 1 | H4 | H4 ka Fib level, pichhli H4 candle ka H/L/O/C, ya H1 swing level zone me |
@@ -62,14 +62,15 @@ Level(f) = H − f × (H − L)        (BUY)
 | 6 | RSI zone | RSI(7) pullback zone me (BUY 30–50, SELL 50–70) |
 | 7 | StochRSI | Oversold (20) se upar cross (BUY) |
 | 8 | Volume | Confirmation candle ka tick volume average ka 1.5 guna |
-| 9 | Sweep | Candle ne pichhla swing low ya PDL toda aur wapas upar close hui |
+| 9 | Sweep | Candle ne pichhla swing low, PDL ya **equal lows** (M15) toda aur wapas upar close hui. Panel par `Sweep(EQ)` = equal lows ka sweep. |
 | 10 | MACD | Histogram mud gaya, ya MACD divergence |
+| 11 | FVG | H1 ya M15 ka FVG golden zone ke saath overlap kare |
 
 | Grade | Point | Default |
 |---|---|---|
 | A | 0–3 | Skip |
 | **A+** | 4–7 | Trade |
-| **A++** | 8–10 | Trade (chaho to bada lot) |
+| **A++** | 8–11 | Trade (chaho to bada lot) |
 
 "Level zone me" ka matlab: zone ke **±$2** ke andar (`InpConfTolUSD`).
 
@@ -81,11 +82,37 @@ Level(f) = H − f × (H − L)        (BUY)
 |---|---|
 | **SL** | Fib 1.0 (L) se $1 aage |
 | **TP** | Fib 1.272. Strong trend (H1 + H4 EMA stack) me 1.618. Kam se kam **$15**. |
+| **Smart TP** | TP se pehle raaste me mazboot liquidity ho (equal highs/lows, POC, PDH/PWH/1M/3M/6M/Y) to TP usse **$0.50 pehle**, lekin $15 se kam nahi |
 | **Breakeven** | Average se **+$5** → saari positions ka SL **average + $0.20** |
 | **DCA** | Har **$5 ulta**, max **3**, wahi lot, **turant** (candle close nahi). 0.786 ke paar DCA nahi. |
-| **Fakeout hedge** | H1 candle 0.786 ke paar close → ulti taraf **hedge** (fixed lot). SL 0.5 ke paar + $1, TP ulti taraf 1.272 (min $15). Hedge me bhi DCA aur breakeven. |
-| **Group close** | Main + hedge ka total **+$1** → sab band |
+| **Fakeout hedge** | H1 candle 0.786 ke paar close → ulti taraf **hedge** (fixed lot, sirf **1 position**). SL 0.5 ke paar + $1, TP ulti taraf 1.272 (min $15). Breakeven hai, **DCA nahi** (`InpHedgeDCA = false`). |
+| **Group close** | Default **OFF**: main aur hedge apne SL/TP se band hote hain. ON karoge (`InpGroupClose`) to total +$1 par sab band. |
 | **Re-entry** | Trade breakeven par band hua aur setup abhi valid hai → **M15** candle trend ki taraf close ho → dobara entry. Ek setup me max **2**. |
+
+### Hedge ka maths (kyun group close OFF hai)
+$40 leg, 0.01 lot, fakeout ke baad:
+
+| Setting | Price neeche hi gaya | Price wapas TP tak |
+|---|---|---|
+| Hedge ON + group close | −$15 | +$1 (jeet kat gayi) |
+| Hedge OFF | −$27.6 | +$76 |
+| **Hedge ON, group close OFF (default)** | **−$15** | **+$62** |
+
+---
+
+## 3b. Manual trades
+
+Aap khud koi XAUUSD trade kholte ho (magic 0), to EA use bhi isi strategy se manage karta hai:
+
+| Kya | Rule |
+|---|---|
+| Fib leg | EA ka setup usi direction me ho to wahi leg, warna pichhla H1 swing low/high |
+| SL / TP | Aapne nahi lagaya to EA **Fib SL** (L − $1) aur **Fib TP** (min $15, smart TP) lagayega. Aapka apna SL/TP ho to waisa hi rahega (`InpKeepManualSLTP`). |
+| Breakeven | +$5 → SL average + $0.20 |
+| DCA | 3 × $5, **aapke trade ke lot se**, 0.786 tak |
+| Hedge | 0.786 ke paar H1 close → hedge (aapke lot se, 1 position) |
+
+Band karna ho to `InpManageManual = false`.
 
 ---
 
@@ -120,7 +147,7 @@ Gold me **0.01 lot = $1 move par $1**.
 | $5,000 | 0.05 | $250 | `GoldSMCFib_4_5000.set` |
 | $10,000 | 0.10 | $500 | `GoldSMCFib_5_10000.set` |
 
-Ek setup me sabse zyada **8 position** ho sakti hain: entry + 3 DCA + hedge + 3 hedge DCA. Isliye lot chhota rakho aur **Daily SL limit** hamesha ON rakho.
+Ek setup me sabse zyada **5 position** ho sakti hain: entry + 3 DCA + 1 hedge. Isliye lot chhota rakho aur **Daily SL limit** hamesha ON rakho.
 
 ---
 
@@ -150,7 +177,7 @@ Ek setup me sabse zyada **8 position** ho sakti hain: entry + 3 DCA + hedge + 3 
 | Setup | Leg ka L, H, golden zone aur 0.786 line |
 | Grade | Jaise `A+ 6/10 H4 D/3D EMA RSIdiv Vol Sweep` |
 | Entry | Trade kyun khula ya kyun ruka |
-| MAIN / HEDGE | Position, lot, average, P/L |
+| MAIN / HEDGE / MANUAL | Position, lot, average, P/L |
 | Aaj | Trade x/7, aaj ka P/L, daily SL, ACTIVE ya STOP ka kaaran |
 | Stats | Win %, A+ aur A++ ka win %, average jeet/haar |
 
@@ -190,4 +217,4 @@ Excel me kholkar dekh sakte ho ki kaunsa grade sabse zyada jeet raha hai.
 
 **Strategy Tester me?** "Every tick based on real ticks", XAUUSD, H1, kam se kam 6–12 mahine ka data. News filter tester me band rehta hai.
 
-**Kabhi nahi karta:** manual ya doosre EA ke trade nahi chhedta, lot double nahi karta.
+**Kabhi nahi karta:** doosre EA ke trade nahi chhedta, lot double nahi karta.
