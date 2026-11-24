@@ -156,7 +156,7 @@ Ek setup me sabse zyada **5 position** ho sakti hain: entry + 3 DCA + 1 hedge. I
 | Input | Default | Kaam |
 |---|---|---|
 | `InpLot` | 0.01 | Fixed lot |
-| `InpMaxTradesDay` | 7 | Entry + re-entry + hedge gine jate hain, DCA nahi |
+| `InpMaxTradesDay` | 8 | Entry + re-entry + hedge gine jate hain, DCA nahi |
 | `InpDailySLUSD` | 100 | Aaj ka loss itna hua → us din nayi entry band |
 | `InpDailyCloseAll` | false | true = daily SL lagte hi khule trade bhi band |
 | `InpDailyTargetUSD` | 0 (off) | Target poora → us din nayi entry band |

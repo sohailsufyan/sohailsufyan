@@ -21,7 +21,7 @@
 //      TP = ulti taraf 1.272 (min $15). Hedge me breakeven hai, DCA default OFF (sirf 1 position).
 //   9. Group close (option): main + hedge ka total >= +$1 -> sab band. Default OFF: dono apne SL/TP se.
 //  10. Breakeven par band hua aur setup valid -> M15 candle close confirmation par re-entry (max 2).
-//  11. Limits: din me max 7 trade, daily SL $, daily target, lagatar loss, weekly loss, equity stop.
+//  11. Limits: din me max 8 trade, daily SL $, daily target, lagatar loss, weekly loss, equity stop.
 //  12. Liquidity heatmap (12H / 1D / 3D / 1W / 1M / ALL), journal CSV + stats panel.
 //  13. Manual trades (magic 0) bhi isi strategy se: Fib SL/TP (agar nahi lagaya), breakeven,
 //      3 DCA x $5, 0.786 fakeout par hedge, group close.
@@ -47,7 +47,7 @@ input double          InpMaxTotalLots   = 1.00;        // EA ki saari positions 
 input double          InpAPPMult        = 1.0;         // A++ grade par lot x (1 = same)
 
 input group "=== Daily / weekly limits ==="
-input int             InpMaxTradesDay   = 7;           // Din me max trades (entry + re-entry + hedge; DCA nahi gina)
+input int             InpMaxTradesDay   = 8;           // Din me max trades (entry + re-entry + hedge; DCA nahi gina)
 input double          InpDailySLUSD     = 100.0;       // Daily SL limit $ (0 = off)
 input double          InpDailySLPct     = 0.0;         // Daily SL limit % of din-shuru balance (0 = off)
 input bool            InpDailyCloseAll  = false;       // Daily SL lage to khule trade bhi band
