@@ -1,4 +1,4 @@
-; GoldSMCFibEA v1.00 - $5,000 account (XAUUSD, H1 chart, Vantage/Exness dono)
+; GoldSMCFibEA v1.01 - $5,000 account (XAUUSD, H1 chart, Vantage/Exness dono)
 InpLotMode=0
 InpLot=0.05
 InpRiskPct=1.0
@@ -93,3 +93,12 @@ InpPanel=true
 InpPanelX=10
 InpPanelY=25
 InpMagic=20261124
+InpSmartTP=true
+InpTPLiqBufUSD=0.50
+InpHedgeDCA=false
+InpGroupClose=false
+InpUseFVG=true
+InpManageManual=true
+InpKeepManualSLTP=true
+InpManualDCA=true
+InpManualHedge=true

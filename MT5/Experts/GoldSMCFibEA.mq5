@@ -9,24 +9,27 @@
 //   3. Pullback 0.5-0.7 golden zone. Entry SIRF H1 candle close par:
 //      candle zone chhuye, 0.786 ke paar close na kare, 0.618 ke upar (BUY) close kare,
 //      aur bullish candle ya pin bar ho. Sirf pehla pullback.
-//   4. Confluence score 0-10 -> grade A / A+ / A++. Min grade se kam = skip.
+//   4. Confluence score 0-11 -> grade A / A+ / A++. Min grade se kam = skip.
 //      1 H4 Fib/level + H1 swing level   2 D / 3D Fib/level   3 W / 1M / 3M / 6M / Y
 //      4 EMA 21/34/50/200 zone me ya H4 stack   5 RSI(7) divergence   6 RSI(7) pullback zone
-//      7 StochRSI cross   8 Volume spike   9 Liquidity sweep   10 MACD turn / divergence
+//      7 StochRSI cross   8 Volume spike   9 Liquidity sweep (equal lows/highs bhi)   10 MACD   11 FVG zone me
 //   5. SL = Fib 1.0 (L) se $1 aage. TP = Fib 1.272 (strong trend 1.618), kam se kam $15.
+//      Smart TP: raaste me mazboot liquidity (equal highs/lows, POC, bada level) ho to usse $0.50 pehle.
 //   6. Average se +$5 -> saari positions ka SL = average + $0.20.
 //   7. DCA: har $5 ulta, max 3, wahi fixed lot, turant (candle close nahi), 0.786 ke paar nahi.
 //   8. Fakeout: H1 candle 0.786 ke paar close -> hedge (fixed lot). Hedge SL = 0.5 ke paar + $1,
-//      TP = ulti taraf 1.272 (min $15). Hedge bhi entry jaisa: DCA 3 x $5, breakeven.
-//   9. Main + hedge ka total >= +$1 -> sab band.
+//      TP = ulti taraf 1.272 (min $15). Hedge me breakeven hai, DCA default OFF (sirf 1 position).
+//   9. Group close (option): main + hedge ka total >= +$1 -> sab band. Default OFF: dono apne SL/TP se.
 //  10. Breakeven par band hua aur setup valid -> M15 candle close confirmation par re-entry (max 2).
 //  11. Limits: din me max 7 trade, daily SL $, daily target, lagatar loss, weekly loss, equity stop.
 //  12. Liquidity heatmap (12H / 1D / 3D / 1W / 1M / ALL), journal CSV + stats panel.
-//  KABHI NAHI: manual / doosre EA ke trade nahi chhedta, lot double nahi karta (DCA fixed lot).
+//  13. Manual trades (magic 0) bhi isi strategy se: Fib SL/TP (agar nahi lagaya), breakeven,
+//      3 DCA x $5, 0.786 fakeout par hedge, group close.
+//  KABHI NAHI: doosre EA ke trade nahi chhedta, lot double nahi karta (DCA fixed lot).
 //  RISK: DCA + hedge se ek setup me 8 position tak ho sakti hain. Daily SL limit zaroor rakho.
 //+------------------------------------------------------------------+
 #property copyright "GoldSMCFibEA"
-#property version   "1.00"
+#property version   "1.01"
 #property description "XAUUSD H1: SMC + Fibonacci golden zone + confluence grade"
 
 #include <Trade/Trade.mqh>
@@ -85,6 +88,8 @@ input double          InpSLBufferUSD    = 1.0;         // SL = Fib 1.0 (L) se it
 input double          InpTPExt          = 1.272;       // TP extension (normal)
 input double          InpTPExtStrong    = 1.618;       // TP extension (strong trend: H1 + H4 EMA stack)
 input double          InpTPMinUSD       = 15.0;        // TP kam se kam entry se itna $
+input bool            InpSmartTP        = true;        // Smart TP: raaste ki mazboot liquidity se pehle (min $15 ke baad)
+input double          InpTPLiqBufUSD    = 0.50;        // Smart TP: liquidity se itna $ pehle
 input double          InpBETriggerUSD   = 5.0;         // Average se itna $ profit = breakeven
 input double          InpBELockUSD      = 0.20;        // Breakeven SL = average + itna $
 
@@ -97,14 +102,16 @@ input group "=== Fakeout hedge ==="
 input bool            InpHedge          = true;        // 0.786 ke paar H1 close = hedge (fixed lot)
 input double          InpHedgeSLBufUSD  = 1.0;         // Hedge SL = Fib 0.5 ke paar + itna $
 input double          InpHedgeExt       = 1.272;       // Hedge TP = ulti taraf ka extension
-input double          InpGroupCloseUSD  = 1.0;         // Main + hedge ka total itna +$ = sab band
+input bool            InpHedgeDCA       = false;       // Hedge me bhi DCA (OFF = hedge sirf 1 position, DD kam)
+input bool            InpGroupClose     = false;       // Main + hedge ka total +$ hote hi sab band (OFF = dono apne SL/TP se)
+input double          InpGroupCloseUSD  = 1.0;         // Group close ON ho to: total itna +$ = sab band
 
 input group "=== Re-entry (breakeven ke baad) ==="
 input bool            InpReEntry        = true;        // Re-entry ON
 input int             InpReEntryMax     = 2;           // Ek setup me max re-entry
 input ENUM_TIMEFRAMES InpReEntryTF      = PERIOD_M15;  // Re-entry confirmation candle TF
 
-input group "=== Confluence grade (10 points) ==="
+input group "=== Confluence grade (11 points) ==="
 input ENUM_MINGRADE   InpMinGrade       = MIN_APLUS;   // Min grade
 input int             InpGradeAPlus     = 4;           // A+ ke liye min points
 input int             InpGradeAPlusPlus = 8;           // A++ ke liye min points
@@ -117,8 +124,9 @@ input bool            InpUseRSIDiv      = true;        // 5: RSI divergence (hid
 input bool            InpUseRSIZone     = true;        // 6: RSI pullback zone
 input bool            InpUseStochRSI    = true;        // 7: StochRSI cross
 input bool            InpUseVolume      = true;        // 8: Volume spike
-input bool            InpUseSweep       = true;        // 9: Liquidity sweep
+input bool            InpUseSweep       = true;        // 9: Liquidity sweep (swing / PDL / equal lows-highs)
 input bool            InpUseMACD        = true;        // 10: MACD histogram turn / divergence
+input bool            InpUseFVG         = true;        // 11: FVG (H1 / M15) golden zone me
 input int             InpRSIPeriod      = 7;           // RSI period (divergence + zone)
 input double          InpRSIBuyLo       = 30.0;        // BUY: RSI zone min
 input double          InpRSIBuyHi       = 50.0;        // BUY: RSI zone max
@@ -144,6 +152,12 @@ input bool            InpShowFVG        = true;        // FVG box
 input bool            InpShowLevels     = true;        // H4 / D / 3D / W / 1M / 3M / 6M / Y levels
 input bool            InpShowVP         = true;        // Volume profile
 input int             InpVPBins         = 40;          // Volume profile bins
+
+input group "=== Manual trades ==="
+input bool            InpManageManual   = true;        // Manual trades (magic 0) bhi isi strategy se manage
+input bool            InpKeepManualSLTP = true;        // Manual ka apna SL/TP ho to waisa hi rahe (nahi ho to EA Fib SL/TP lagaye)
+input bool            InpManualDCA      = true;        // Manual trade par DCA (3 x $5, manual lot)
+input bool            InpManualHedge    = true;        // Manual trade par 0.786 fakeout hedge
 
 input group "=== Journal / panel ==="
 input bool            InpJournal        = true;        // Har closed trade CSV me (MQL5/Files)
@@ -176,6 +190,16 @@ SetupT   S;
 
 struct Basket { int n, dir; double lots, pv, profit, worst, sl, tp, firstLot; };
 Basket   MB, HB;   // MB = main (setup direction), HB = hedge
+Basket   MMB[2], MHB[2];   // manual basket (0 = BUY, 1 = SELL) aur uska hedge
+struct ManCtx { bool act; double L, H; bool hedgeDone; };
+ManCtx   MC[2];
+#define  K_MAIN  0
+#define  K_HEDGE 1
+#define  K_MANB  2
+#define  K_MANS  3
+#define  K_MHB   4
+#define  K_MHS   5
+#define  MAXPTS  11
 
 bool     rtOn = true, rtHMOn = true;
 int      rtMinGrade = 1, rtHM = 4;
@@ -237,6 +261,7 @@ int OnInit()
    rtOn = true; rtLot = InpLot; rtMinGrade = (int)InpMinGrade; rtHM = (int)InpHMRange; rtHMOn = InpHeatmap;
    gv = "SFE_" + _Symbol + "_" + IntegerToString(InpMagic) + "_";
    ResetSetup();
+   for(int k = 0; k < 2; k++) { MC[k].act = false; MC[k].L = 0; MC[k].H = 0; MC[k].hedgeDone = false; }
    LoadState();
    ReadBaskets();
    prevMainN = MB.n;
@@ -376,19 +401,52 @@ void AddB(Basket &b, int d, double v, double op, double pr, double sl, double tp
    if(b.firstLot == 0) b.firstLot = v;
   }
 
+// Selected position kis basket ki hai (-1 = hamari nahi)
+int KindOf()
+  {
+   if(PositionGetString(POSITION_SYMBOL) != _Symbol) return -1;
+   long mg = PositionGetInteger(POSITION_MAGIC);
+   int d = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1;
+   if(mg == 0) return InpManageManual ? (d == 1 ? K_MANB : K_MANS) : -1;
+   if(mg != InpMagic) return -1;
+   string c = PositionGetString(POSITION_COMMENT);
+   if(StringFind(c, "SFE MHB") == 0) return K_MHB;
+   if(StringFind(c, "SFE MHS") == 0) return K_MHS;
+   if(StringFind(c, "SFE MD") == 0)  return d == 1 ? K_MANB : K_MANS;
+   if(StringFind(c, "SFE H") == 0)   return K_HEDGE;
+   return K_MAIN;
+  }
+
 void ReadBaskets()
   {
    ZeroB(MB); ZeroB(HB);
+   for(int k = 0; k < 2; k++) { ZeroB(MMB[k]); ZeroB(MHB[k]); }
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
-      if(PositionGetTicket(i) == 0 || !Mine()) continue;
+      if(PositionGetTicket(i) == 0) continue;
+      int kind = KindOf();
+      if(kind < 0) continue;
       int d = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1;
       double v = PositionGetDouble(POSITION_VOLUME), op = PositionGetDouble(POSITION_PRICE_OPEN);
       double pr = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       double sl = PositionGetDouble(POSITION_SL), tp = PositionGetDouble(POSITION_TP);
-      if(IsHedgeCmt(PositionGetString(POSITION_COMMENT))) AddB(HB, d, v, op, pr, sl, tp);
-      else AddB(MB, d, v, op, pr, sl, tp);
+      if(kind == K_MAIN)       AddB(MB, d, v, op, pr, sl, tp);
+      else if(kind == K_HEDGE) AddB(HB, d, v, op, pr, sl, tp);
+      else if(kind == K_MANB)  AddB(MMB[0], d, v, op, pr, sl, tp);
+      else if(kind == K_MANS)  AddB(MMB[1], d, v, op, pr, sl, tp);
+      else if(kind == K_MHB)   AddB(MHB[0], d, v, op, pr, sl, tp);
+      else if(kind == K_MHS)   AddB(MHB[1], d, v, op, pr, sl, tp);
      }
+  }
+
+void CloseKind(int kind)
+  {
+   for(int pass = 0; pass < 3; pass++)
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         ulong t = PositionGetTicket(i);
+         if(t > 0 && KindOf() == kind) trade.PositionClose(t);
+        }
   }
 
 //==================== STATE (restart ke baad yaad rahe) ====================
@@ -412,6 +470,12 @@ void SaveState()
    GlobalVariableSet(gv + "dS", (double)(long)dayStart); GlobalVariableSet(gv + "dEq", dayStartEq);
    GlobalVariableSet(gv + "dBal", dayStartBal);     GlobalVariableSet(gv + "cL", consecLoss);
    GlobalVariableSet(gv + "dSt", dayStopped ? 1 : 0);
+   for(int k = 0; k < 2; k++)
+     {
+      string m = gv + "m" + IntegerToString(k);
+      GlobalVariableSet(m + "a", MC[k].act ? 1 : 0); GlobalVariableSet(m + "L", MC[k].L);
+      GlobalVariableSet(m + "H", MC[k].H);           GlobalVariableSet(m + "h", MC[k].hedgeDone ? 1 : 0);
+     }
   }
 
 void LoadState()
@@ -431,6 +495,14 @@ void LoadState()
       dayStartEq = GlobalVariableGet(gv + "dEq"); dayStartBal = GlobalVariableGet(gv + "dBal");
       consecLoss = (int)GlobalVariableGet(gv + "cL"); dayStopped = GlobalVariableGet(gv + "dSt") > 0.5;
       if(dayStopped) stopWhy = "aaj ka stop (restart se pehle)";
+     }
+   for(int k = 0; k < 2; k++)
+     {
+      string m = gv + "m" + IntegerToString(k);
+      if(!GlobalVariableCheck(m + "a")) continue;
+      MC[k].act = GlobalVariableGet(m + "a") > 0.5; MC[k].L = GlobalVariableGet(m + "L");
+      MC[k].H = GlobalVariableGet(m + "H");          MC[k].hedgeDone = GlobalVariableGet(m + "h") > 0.5;
+      if(MC[k].act && MC[k].H <= MC[k].L) MC[k].act = false;
      }
    if(S.act && (S.dir == 0 || S.H <= S.L)) ResetSetup();
   }
@@ -649,11 +721,8 @@ bool StrongTrend(int dir)
   }
 
 //==================== FIBONACCI ====================
-double Fib(double f)
-  {
-   double R = S.H - S.L;
-   return S.dir == 1 ? S.H - f * R : S.L + f * R;
-  }
+double FibOf(int d, double L, double H, double f) { double R = H - L; return d == 1 ? H - f * R : L + f * R; }
+double Fib(double f) { return FibOf(S.dir, S.L, S.H, f); }
 
 double CalcTP(int d, double entry)
   {
@@ -661,7 +730,87 @@ double CalcTP(int d, double entry)
    double ext = StrongTrend(d) ? InpTPExtStrong : InpTPExt;
    double fibTP = d == 1 ? S.H + (ext - 1.0) * R : S.L - (ext - 1.0) * R;
    double minTP = entry + d * InpTPMinUSD;
-   return d == 1 ? MathMax(fibTP, minTP) : MathMin(fibTP, minTP);
+   return SmartTP(d, entry, d == 1 ? MathMax(fibTP, minTP) : MathMin(fibTP, minTP));
+  }
+
+void AddLv(double &lv[], int &n, double p) { if(p <= 0) return; ArrayResize(lv, n + 1); lv[n] = p; n++; }
+
+// Volume profile ka POC (sabse zyada trading wala price), heatmap range ke M15 candles se
+double POCPrice(int hours)
+  {
+   int vb = (int)MathMin(iBarShift(_Symbol, PERIOD_M15, TimeCurrent() - hours * 3600), 3000);
+   if(vb <= 5) return 0;
+   int ih = iHighest(_Symbol, PERIOD_M15, MODE_HIGH, vb, 1), il = iLowest(_Symbol, PERIOD_M15, MODE_LOW, vb, 1);
+   if(ih < 0 || il < 0) return 0;
+   double hi = iHigh(_Symbol, PERIOD_M15, ih), lo = iLow(_Symbol, PERIOD_M15, il);
+   int bins = InpVPBins > 2 ? InpVPBins : 40;
+   if(hi <= lo) return 0;
+   double step = (hi - lo) / bins, vol[];
+   ArrayResize(vol, bins); ArrayInitialize(vol, 0);
+   for(int s = 1; s <= vb; s++)
+     {
+      double tp = (iHigh(_Symbol, PERIOD_M15, s) + iLow(_Symbol, PERIOD_M15, s) + iClose(_Symbol, PERIOD_M15, s)) / 3.0;
+      int k = (int)MathFloor((tp - lo) / step);
+      k = k < 0 ? 0 : (k > bins - 1 ? bins - 1 : k);
+      vol[k] += (double)iVolume(_Symbol, PERIOD_M15, s);
+     }
+   int mk = ArrayMaximum(vol);
+   return lo + (mk + 0.5) * step;
+  }
+
+// Trade ki direction me aage padi mazboot liquidity: equal highs/lows (sweep nahi hui), bade levels, POC
+int LiquidityTargets(int dir, double entry, double &lv[])
+  {
+   int n = 0;
+   double sp[]; int ns = 0;
+   for(int s = 3; s < 200; s++)
+     {
+      if(dir == 1 && IsSwingHigh(PERIOD_H1, s, 2))
+        {
+         double p = iHigh(_Symbol, PERIOD_H1, s);
+         int ih = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, s - 1, 1);
+         if(p > entry && ih >= 0 && iHigh(_Symbol, PERIOD_H1, ih) <= p) { ArrayResize(sp, ns + 1); sp[ns] = p; ns++; }
+        }
+      if(dir == -1 && IsSwingLow(PERIOD_H1, s, 2))
+        {
+         double p = iLow(_Symbol, PERIOD_H1, s);
+         int il = iLowest(_Symbol, PERIOD_H1, MODE_LOW, s - 1, 1);
+         if(p < entry && il >= 0 && iLow(_Symbol, PERIOD_H1, il) >= p) { ArrayResize(sp, ns + 1); sp[ns] = p; ns++; }
+        }
+     }
+   for(int i = 0; i < ns; i++)
+      for(int j = i + 1; j < ns; j++)
+         if(MathAbs(sp[i] - sp[j]) <= InpEqualTolUSD) AddLv(lv, n, dir == 1 ? MathMin(sp[i], sp[j]) : MathMax(sp[i], sp[j]));
+   ENUM_TIMEFRAMES tfs[6] = {PERIOD_D1, PERIOD_W1, PERIOD_MN1, PERIOD_MN1, PERIOD_MN1, PERIOD_MN1};
+   int cnt[6] = {1, 1, 1, 3, 6, 12};
+   for(int t = 0; t < 6; t++)
+     {
+      if(iBars(_Symbol, tfs[t]) < cnt[t] + 2) continue;
+      double h = iHigh(_Symbol, tfs[t], 1), l = iLow(_Symbol, tfs[t], 1);
+      for(int s = 2; s <= cnt[t]; s++) { h = MathMax(h, iHigh(_Symbol, tfs[t], s)); l = MathMin(l, iLow(_Symbol, tfs[t], s)); }
+      if(dir == 1 && h > entry) AddLv(lv, n, h);
+      if(dir == -1 && l < entry) AddLv(lv, n, l);
+     }
+   double poc = POCPrice(RangeHours());
+   if((dir == 1 && poc > entry) || (dir == -1 && poc < entry && poc > 0)) AddLv(lv, n, poc);
+   return n;
+  }
+
+// Fib TP se pehle koi mazboot liquidity ho to TP usse $0.50 pehle (lekin entry se $15 se kam nahi)
+double SmartTP(int dir, double entry, double tp0)
+  {
+   if(!InpSmartTP) return tp0;
+   double minTP = entry + dir * InpTPMinUSD, best = tp0;
+   double lv[];
+   int n = LiquidityTargets(dir, entry, lv);
+   for(int i = 0; i < n; i++)
+     {
+      double t = lv[i] - dir * InpTPLiqBufUSD;
+      if(dir == 1 && t >= minTP && t < best) best = t;
+      if(dir == -1 && t <= minTP && t > best) best = t;
+     }
+   if(MathAbs(best - tp0) > _Point) PrintFormat("Smart TP: raaste me liquidity, TP %.2f (Fib wala %.2f)", best, tp0);
+   return best;
   }
 
 void NewSetup(int d, double L, double H, double atr)
@@ -730,7 +879,7 @@ void UpdateSetup()
    SaveState();
   }
 
-//==================== CONFLUENCE (10 points) ====================
+//==================== CONFLUENCE (11 points) ====================
 bool InZ(double p, double zLo, double zHi) { return p > 0 && p >= zLo - InpConfTolUSD && p <= zHi + InpConfTolUSD; }
 
 // TF ke pichhle 'cnt' candles ka High / Low / Open / Close
@@ -855,23 +1004,55 @@ bool VolumeSpike()
   }
 
 // Confirmation candle ne liquidity (pichhla H1 swing / pichhle din ka low-high) li aur wapas close hui
-bool LiquiditySweep(int d)
+// 0 = sweep nahi, 1 = swing / PDL-PDH sweep, 2 = equal lows/highs (M15) ka sweep
+int LiquiditySweep(int d)
   {
    double l1 = iLow(_Symbol, PERIOD_H1, 1), h1 = iHigh(_Symbol, PERIOD_H1, 1), c1 = iClose(_Symbol, PERIOD_H1, 1);
+   //--- equal lows / highs (M15, pichhle ~24 ghante): sabse zyada stop-loss yahin
+   double ep[]; int ne = 0;
+   for(int s = 5; s < 100; s++)
+     {
+      if(d == 1 && IsSwingLow(PERIOD_M15, s, 2))   { ArrayResize(ep, ne + 1); ep[ne] = iLow(_Symbol, PERIOD_M15, s);  ne++; }
+      if(d == -1 && IsSwingHigh(PERIOD_M15, s, 2)) { ArrayResize(ep, ne + 1); ep[ne] = iHigh(_Symbol, PERIOD_M15, s); ne++; }
+     }
+   for(int i = 0; i < ne; i++)
+      for(int j = i + 1; j < ne; j++)
+         if(MathAbs(ep[i] - ep[j]) <= InpEqualTolUSD)
+           {
+            double lv = d == 1 ? MathMin(ep[i], ep[j]) : MathMax(ep[i], ep[j]);
+            if(d == 1 && l1 < lv && c1 > lv) return 2;
+            if(d == -1 && h1 > lv && c1 < lv) return 2;
+           }
    if(d == 1)
      {
       double pdl = iLow(_Symbol, PERIOD_D1, 1);
-      if(pdl > 0 && l1 < pdl && c1 > pdl) return true;
+      if(pdl > 0 && l1 < pdl && c1 > pdl) return 1;
       for(int s = 3; s < 100; s++)
-         if(IsSwingLow(PERIOD_H1, s, 2)) { double p = iLow(_Symbol, PERIOD_H1, s); if(l1 < p && c1 > p) return true; }
+         if(IsSwingLow(PERIOD_H1, s, 2)) { double p = iLow(_Symbol, PERIOD_H1, s); if(l1 < p && c1 > p) return 1; }
      }
    else
      {
       double pdh = iHigh(_Symbol, PERIOD_D1, 1);
-      if(pdh > 0 && h1 > pdh && c1 < pdh) return true;
+      if(pdh > 0 && h1 > pdh && c1 < pdh) return 1;
       for(int s = 3; s < 100; s++)
-         if(IsSwingHigh(PERIOD_H1, s, 2)) { double p = iHigh(_Symbol, PERIOD_H1, s); if(h1 > p && c1 < p) return true; }
+         if(IsSwingHigh(PERIOD_H1, s, 2)) { double p = iHigh(_Symbol, PERIOD_H1, s); if(h1 > p && c1 < p) return 1; }
      }
+   return 0;
+  }
+
+// FVG (H1 ya M15) jo golden zone ke saath overlap kare
+bool FVGInZone(int d, double zLo, double zHi)
+  {
+   ENUM_TIMEFRAMES tfs[2] = {PERIOD_H1, PERIOD_M15};
+   int lk[2] = {60, 96};
+   for(int t = 0; t < 2; t++)
+      for(int i = 1; i < lk[t] - 2; i++)
+        {
+         double lo0 = iLow(_Symbol, tfs[t], i), hi0 = iHigh(_Symbol, tfs[t], i);
+         double hi2 = iHigh(_Symbol, tfs[t], i + 2), lo2 = iLow(_Symbol, tfs[t], i + 2);
+         if(d == 1 && lo0 > hi2 && lo0 >= zLo - InpConfTolUSD && hi2 <= zHi + InpConfTolUSD) return true;
+         if(d == -1 && hi0 < lo2 && lo2 >= zLo - InpConfTolUSD && hi0 <= zHi + InpConfTolUSD) return true;
+        }
    return false;
   }
 
@@ -910,8 +1091,13 @@ int Score(int d, double z1, double z2, string &why)
    if(InpUseRSIZone && RSIZone(d))            { sc++; why += "RSIz "; }
    if(InpUseStochRSI && StochRSICross(d))     { sc++; why += "StRSI "; }
    if(InpUseVolume && VolumeSpike())          { sc++; why += "Vol "; }
-   if(InpUseSweep && LiquiditySweep(d))       { sc++; why += "Sweep "; }
+   if(InpUseSweep)
+     {
+      int sw = LiquiditySweep(d);
+      if(sw > 0) { sc++; why += sw == 2 ? "Sweep(EQ) " : "Sweep "; }
+     }
    if(InpUseMACD && MACDTurn(d))              { sc++; why += "MACD "; }
+   if(InpUseFVG && FVGInZone(d, zLo, zHi))    { sc++; why += "FVG "; }
    return sc;
   }
 
@@ -958,11 +1144,11 @@ void CheckEntry()
    string why;
    int sc = Score(d, z05, z07, why);
    S.score = sc; S.grade = GradeName(sc); S.why = why;
-   PrintFormat("SIGNAL %s %s %d/10: %s", d == 1 ? "BUY" : "SELL", S.grade, sc, why);
-   if(GradeIdx(sc) < rtMinGrade) { entryWhy = StringFormat("%s %d/10 min grade %s se kam, skip", S.grade, sc, MinGradeName()); return; }
+   PrintFormat("SIGNAL %s %s %d/%d: %s", d == 1 ? "BUY" : "SELL", S.grade, sc, MAXPTS, why);
+   if(GradeIdx(sc) < rtMinGrade) { entryWhy = StringFormat("%s %d/%d min grade %s se kam, skip", S.grade, sc, MAXPTS, MinGradeName()); return; }
    string block;
-   if(!AllowNew(block)) { entryWhy = StringFormat("%s %d/10 mila, ruka: %s", S.grade, sc, block); return; }
-   if(OpenMain(d, StringFormat("SFE E %s%d", S.grade, sc))) entryWhy = StringFormat("%s ENTRY %s %d/10", d == 1 ? "BUY" : "SELL", S.grade, sc);
+   if(!AllowNew(block)) { entryWhy = StringFormat("%s %d/%d mila, ruka: %s", S.grade, sc, MAXPTS, block); return; }
+   if(OpenMain(d, StringFormat("SFE E %s%d", S.grade, sc))) entryWhy = StringFormat("%s ENTRY %s %d/%d", d == 1 ? "BUY" : "SELL", S.grade, sc, MAXPTS);
    else entryWhy = "order fail (Experts tab dekho)";
   }
 
@@ -1004,14 +1190,14 @@ void CheckHedge()
    double R = S.H - S.L;
    double fibTP = d == 1 ? S.L - (InpHedgeExt - 1.0) * R : S.H + (InpHedgeExt - 1.0) * R;
    double minTP = px + hd * InpTPMinUSD;
-   double tp = hd == -1 ? MathMin(fibTP, minTP) : MathMax(fibTP, minTP);
+   double tp = SmartTP(hd, px, hd == -1 ? MathMin(fibTP, minTP) : MathMax(fibTP, minTP));
    double lot = CalcLot(MathAbs(px - sl));
    PrintFormat("FAKEOUT: H1 close %.2f, 0.786 (%.2f) ke paar -> HEDGE", c1, zi);
    if(SendOrder(hd, lot, sl, tp, "SFE HG")) { S.hedgeDone = true; SaveState(); }
   }
 
 //==================== MANAGEMENT (har tick) ====================
-void ManageBE(Basket &b, bool hedge)
+void ManageBE(Basket &b, int kind)
   {
    if(b.n == 0) return;
    int d = b.dir;
@@ -1022,30 +1208,138 @@ void ManageBE(Basket &b, bool hedge)
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       ulong t = PositionGetTicket(i);
-      if(t == 0 || !Mine() || IsHedgeCmt(PositionGetString(POSITION_COMMENT)) != hedge) continue;
+      if(t == 0 || KindOf() != kind) continue;
       double cur = PositionGetDouble(POSITION_SL), tp = PositionGetDouble(POSITION_TP);
       bool better = d == 1 ? (cur < nsl - _Point) : (cur == 0 || cur > nsl + _Point);
       if(better && trade.PositionModify(t, nsl, tp))
-         PrintFormat("%s BREAKEVEN: SL %.2f (average %.2f + $%.2f)", hedge ? "HEDGE" : "MAIN", nsl, avg, InpBELockUSD);
+         PrintFormat("%s BREAKEVEN: SL %.2f (average %.2f + $%.2f)", KindName(kind), nsl, avg, InpBELockUSD);
      }
   }
 
 // DCA: aakhri (sabse kharab) position se $5 ulta, max 3, turant. Main me 0.786 ke paar nahi
-void ManageDCA(Basket &b, bool hedge)
+string KindName(int kind)
+  {
+   string n[6] = {"MAIN", "HEDGE", "MANUAL BUY", "MANUAL SELL", "MANUAL-BUY HEDGE", "MANUAL-SELL HEDGE"};
+   return kind >= 0 && kind < 6 ? n[kind] : "?";
+  }
+
+void ManageDCA(Basket &b, int kind)
   {
    if(!InpDCA || !rtOn || b.n == 0 || b.n - 1 >= InpDCAMax) return;
+   bool manual = kind == K_MANB || kind == K_MANS || kind == K_MHB || kind == K_MHS;
+   if(manual && !InpManualDCA) return;
+   if(!InpHedgeDCA && (kind == K_HEDGE || kind == K_MHB || kind == K_MHS)) return;   // hedge me DCA nahi
    int d = b.dir;
    double bid = Bid(), ask = Ask();
    if(!(d == 1 ? ask <= b.worst - InpDCAStepUSD : bid >= b.worst + InpDCAStepUSD)) return;
-   if(!hedge && S.act && S.dir == d)
-     {
-      double zi = Fib(InpInvalidFib);
-      if(d == 1 ? bid <= zi : ask >= zi) return;
-     }
+   double zi = 0;
+   if(kind == K_MAIN && S.act && S.dir == d) zi = Fib(InpInvalidFib);
+   if(kind == K_MANB && MC[0].act) zi = FibOf(1, MC[0].L, MC[0].H, InpInvalidFib);
+   if(kind == K_MANS && MC[1].act) zi = FibOf(-1, MC[1].L, MC[1].H, InpInvalidFib);
+   if(zi > 0 && (d == 1 ? bid <= zi : ask >= zi)) return;      // 0.786 ke paar DCA nahi
    if(Spread() > InpMaxSpreadUSD) return;
    double lot = b.firstLot > 0 ? NormLot(b.firstLot) : NormLot(rtLot);
-   string cmt = (hedge ? "SFE HD" : "SFE D") + IntegerToString(b.n);
-   SendOrder(d, lot, b.sl, b.tp, cmt);
+   string pre = kind == K_HEDGE ? "SFE HD" : (kind == K_MAIN ? "SFE D" : (kind == K_MHB ? "SFE MHB" : (kind == K_MHS ? "SFE MHS" : "SFE MD")));
+   SendOrder(d, lot, b.sl, b.tp, pre + IntegerToString(b.n));
+  }
+
+//==================== MANUAL TRADES (isi strategy se) ====================
+// Manual trade ka Fib leg: EA ka setup same direction me ho to wahi, warna pichhla H1 swing
+bool ManualLeg(int d, double entry, double &L, double &H)
+  {
+   if(S.act && S.dir == d) { L = S.L; H = S.H; return true; }
+   int maxS = (int)MathMin(InpSwingLookback, iBars(_Symbol, PERIOD_H1) - InpSwingBars - 2);
+   for(int s = InpSwingBars + 1; s < maxS; s++)
+     {
+      if(d == 1 && IsSwingLow(PERIOD_H1, s, InpSwingBars) && iLow(_Symbol, PERIOD_H1, s) < entry)
+        {
+         L = iLow(_Symbol, PERIOD_H1, s);
+         int ih = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, s, 0);
+         H = MathMax(ih >= 0 ? iHigh(_Symbol, PERIOD_H1, ih) : entry, entry);
+         return H > L;
+        }
+      if(d == -1 && IsSwingHigh(PERIOD_H1, s, InpSwingBars) && iHigh(_Symbol, PERIOD_H1, s) > entry)
+        {
+         H = iHigh(_Symbol, PERIOD_H1, s);
+         int il = iLowest(_Symbol, PERIOD_H1, MODE_LOW, s, 0);
+         L = MathMin(il >= 0 ? iLow(_Symbol, PERIOD_H1, il) : entry, entry);
+         return H > L;
+        }
+     }
+   return false;
+  }
+
+// Manual basket: leg, Fib SL/TP (agar nahi), breakeven, DCA, hedge, group close
+void ManageManual(int k, bool newH1)
+  {
+   if(!InpManageManual) return;
+   int d = k == 0 ? 1 : -1, kind = k == 0 ? K_MANB : K_MANS, hkind = k == 0 ? K_MHB : K_MHS;
+   if(MMB[k].n == 0)
+     {
+      if(MC[k].act && MHB[k].n == 0) { MC[k].act = false; MC[k].hedgeDone = false; SaveState(); }
+      ManageBE(MHB[k], hkind);
+      ManageDCA(MHB[k], hkind);
+      return;
+     }
+   if(!MC[k].act)
+     {
+      double L = 0, H = 0;
+      if(!ManualLeg(d, Avg(MMB[k]), L, H)) return;
+      MC[k].act = true; MC[k].L = L; MC[k].H = H; MC[k].hedgeDone = false;
+      PrintFormat("MANUAL %s mila: Fib leg L %.2f  H %.2f | 0.786 %.2f", d == 1 ? "BUY" : "SELL", L, H, FibOf(d, L, H, InpInvalidFib));
+      SaveState();
+     }
+   //--- group close: manual + uska hedge total profit me
+   if(InpGroupClose && MHB[k].n > 0 && MMB[k].profit + MHB[k].profit >= InpGroupCloseUSD)
+     {
+      PrintFormat("MANUAL GROUP CLOSE: %+.2f + hedge %+.2f", MMB[k].profit, MHB[k].profit);
+      CloseKind(hkind); CloseKind(kind);
+      MC[k].act = false; MC[k].hedgeDone = false; SaveState();
+      return;
+     }
+   //--- Fib SL / TP (manual ka apna ho to waisa hi)
+   double sl = NP(d == 1 ? MC[k].L - InpSLBufferUSD : MC[k].H + InpSLBufferUSD);
+   double bid = Bid(), ask = Ask(), sm = StopsMin();
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || KindOf() != kind) continue;
+      double cs = PositionGetDouble(POSITION_SL), ct = PositionGetDouble(POSITION_TP), op = PositionGetDouble(POSITION_PRICE_OPEN);
+      double nsl = cs, ntp = ct;
+      bool needTP = ct == 0 || (!InpKeepManualSLTP && newH1);   // TP sirf zarurat par (har tick nahi)
+      if(needTP)
+        {
+         double R = MC[k].H - MC[k].L, ext = StrongTrend(d) ? InpTPExtStrong : InpTPExt;
+         double fibTP = d == 1 ? MC[k].H + (ext - 1.0) * R : MC[k].L - (ext - 1.0) * R, minTP = op + d * InpTPMinUSD;
+         ntp = NP(SmartTP(d, op, d == 1 ? MathMax(fibTP, minTP) : MathMin(fibTP, minTP)));
+        }
+      bool slWorse = cs > 0 && (d == 1 ? cs < sl : cs > sl);
+      if(cs == 0 || (!InpKeepManualSLTP && slWorse)) nsl = sl;
+      if(nsl > 0 && (d == 1 ? bid - nsl < sm : nsl - ask < sm)) nsl = cs;
+      if(ntp > 0 && (d == 1 ? ntp - ask < sm : bid - ntp < sm)) ntp = ct;
+      if(MathAbs(nsl - cs) > _Point || MathAbs(ntp - ct) > _Point)
+         if(trade.PositionModify(t, nsl, ntp)) PrintFormat("MANUAL %s #%I64u: SL %.2f  TP %.2f (Fib)", d == 1 ? "BUY" : "SELL", t, nsl, ntp);
+     }
+   ManageBE(MMB[k], kind);
+   ManageBE(MHB[k], hkind);
+   ManageDCA(MMB[k], kind);
+   ManageDCA(MHB[k], hkind);
+   //--- fakeout hedge (H1 close 0.786 ke paar), manual lot
+   if(newH1 && InpManualHedge && rtOn && !MC[k].hedgeDone && MHB[k].n == 0)
+     {
+      double c1 = iClose(_Symbol, PERIOD_H1, 1), zi = FibOf(d, MC[k].L, MC[k].H, InpInvalidFib);
+      if((d == 1 ? c1 < zi : c1 > zi) && Spread() <= InpMaxSpreadUSD)
+        {
+         int hd = -d;
+         double px = hd == 1 ? Ask() : Bid();
+         double hsl = FibOf(d, MC[k].L, MC[k].H, InpZoneTop) + d * InpHedgeSLBufUSD;
+         double R = MC[k].H - MC[k].L;
+         double fibTP = d == 1 ? MC[k].L - (InpHedgeExt - 1.0) * R : MC[k].H + (InpHedgeExt - 1.0) * R, minTP = px + hd * InpTPMinUSD;
+         double htp = SmartTP(hd, px, hd == -1 ? MathMin(fibTP, minTP) : MathMax(fibTP, minTP));
+         PrintFormat("MANUAL FAKEOUT: H1 close %.2f, 0.786 (%.2f) ke paar -> HEDGE", c1, zi);
+         if(SendOrder(hd, NormLot(MMB[k].firstLot), hsl, htp, k == 0 ? "SFE MHB" : "SFE MHS")) { MC[k].hedgeDone = true; SaveState(); }
+        }
+     }
   }
 
 // Main basket ki aakhri closing deal: 1 = TP / profit, 2 = breakeven (SL profit me), 3 = loss
@@ -1113,7 +1407,7 @@ void OnTick()
       return;
      }
    //--- main + hedge total profit me = sab band
-   if(MB.n > 0 && HB.n > 0 && MB.profit + HB.profit >= InpGroupCloseUSD)
+   if(InpGroupClose && MB.n > 0 && HB.n > 0 && MB.profit + HB.profit >= InpGroupCloseUSD)
      {
       PrintFormat("GROUP CLOSE: main %+.2f + hedge %+.2f", MB.profit, HB.profit);
       CloseAll("main + hedge profit me");
@@ -1121,15 +1415,18 @@ void OnTick()
       return;
      }
 
-   ManageBE(MB, false);
-   ManageBE(HB, true);
-   ManageDCA(MB, false);
-   ManageDCA(HB, true);
+   ManageBE(MB, K_MAIN);
+   ManageBE(HB, K_HEDGE);
+   ManageDCA(MB, K_MAIN);
+   ManageDCA(HB, K_HEDGE);
    HandleBasketClose();
 
    //--- har naye H1 candle par: hedge check, entry, leg update, naya BOS
    datetime h1t = iTime(_Symbol, PERIOD_H1, 0);
-   if(h1t != lastH1 && h1t > 0)
+   bool newH1 = h1t != lastH1 && h1t > 0;
+   ManageManual(0, newH1);
+   ManageManual(1, newH1);
+   if(newH1)
      {
       lastH1 = h1t;
       curTrend = Trend();
@@ -1408,7 +1705,7 @@ void Panel()
    lastDraw = TimeLocal();
    int W = 380, y = 6;
    Rc("bg", 0, 0, W, 100, cBg);
-   Tx("ti", 10, y, "GOLD SMC FIB EA  v1.00", cTx, 10, true);
+   Tx("ti", 10, y, "GOLD SMC FIB EA  v1.01", cTx, 10, true);
    Tx("on", W - 70, y + 2, rtOn ? "RUNNING" : "OFF", rtOn ? cB : cS, 8, true);
    y += 20;
    int h4 = EmaStack(h4E1, h4E2, h4E3, h4E4, PERIOD_H4, false);
@@ -1420,7 +1717,7 @@ void Panel()
                             Fib(InpZoneTop), Fib(InpZoneBottom), Fib(InpInvalidFib));
    Tx("su", 10, y, su, S.act ? cW : cDm);
    y += 16;
-   Tx("gr", 10, y, S.score > 0 || S.act ? StringFormat("Grade: %s %d/10  %s", S.grade, S.score, S.why) : "Grade: -", cTx);
+   Tx("gr", 10, y, S.score > 0 || S.act ? StringFormat("Grade: %s %d/%d  %s", S.grade, S.score, MAXPTS, S.why) : "Grade: -", cTx);
    y += 16;
    Tx("ew", 10, y, "Entry: " + entryWhy, StringFind(entryWhy, "ENTRY") >= 0 ? cB : cDm);
    y += 20;
@@ -1431,6 +1728,13 @@ void Panel()
    Rc("ch", 6, y, W - 12, 20, cCard);
    Tx("hb", 12, y + 3, HB.n > 0 ? StringFormat("HEDGE %s %d pos | %.2f lot | P/L %+.2f", HB.dir == 1 ? "BUY" : "SELL", HB.n, HB.lots, HB.profit)
                               : "HEDGE: nahi", HB.n > 0 ? cW : cDm, 8, true);
+   y += 22;
+   string mt = "MANUAL: koi trade nahi";
+   if(MMB[0].n + MMB[1].n + MHB[0].n + MHB[1].n > 0)
+      mt = StringFormat("MANUAL  BUY %d pos %+.2f%s | SELL %d pos %+.2f%s", MMB[0].n, MMB[0].profit, MHB[0].n > 0 ? " +hedge" : "",
+                        MMB[1].n, MMB[1].profit, MHB[1].n > 0 ? " +hedge" : "");
+   Rc("cmn", 6, y, W - 12, 20, cCard);
+   Tx("mn", 12, y + 3, InpManageManual ? mt : "MANUAL: manage OFF", MMB[0].n + MMB[1].n > 0 ? cTx : cDm, 8, true);
    y += 24;
    double lim = DailyLimit();
    string stt;
