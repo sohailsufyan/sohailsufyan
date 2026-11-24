@@ -238,7 +238,7 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Trend H1 = structure (HH/HL) + EMA 21/34/50/200; UP = sirf BUY, DOWN = sirf SELL, side-ways = no trade
 - H1 BOS → impulse leg → 0.5–0.7 golden zone pullback → H1 close confirmation (0.618 ke paar close, 0.786 ke paar nahi)
 - 10-point confluence grade (H4, D/3D, W/big levels, EMA, RSI(7) div, RSI zone, StochRSI, volume, sweep, MACD) → A / A+ / A++, min grade input
-- SL Fib 1.0 − $1, TP 1.272 (strong trend 1.618) min $15, BE +$5 → +$0.20, DCA 3 × $5 (turant, 0.786 tak)
+- SL Fib 1.0 − $1, TP 1.272 (strong trend 1.618) min $15, BE +$5 → +$0.50, DCA 3 × $5 (turant, 0.786 tak)
 - Fakeout: H1 close 0.786 ke paar → fixed-lot hedge (SL 0.5 ke paar, TP ulta 1.272); main + hedge ≥ +$1 → group close
 - Re-entry (BE ke baad) M15 close confirmation, max 2; limits: 7 trade/din, daily SL $, target, lagatar loss, weekly, equity stop
 - Liquidity heatmap (12H/1D/3D/1W/1M/ALL), journal CSV, stats panel
@@ -246,3 +246,4 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **v1.01:** equal lows/highs (M15) ka sweep, point 11 = FVG golden zone me, Smart TP (liquidity se $0.50 pehle, min $15), manual trades isi strategy se (Fib SL/TP agar nahi, BE, 3 DCA, hedge), hedge me DCA OFF (sirf 1 position), group close default OFF
 - **v1.02:** manual trades: SL $5–20 (Fib leg, ATR fallback), TP min $15 aur SL×1.5 (max $40), DCA/hedge line risk ke 0.786 par, BUY+SELL dono khule = sirf SL/TP/BE, aapka apna SL/TP EA nahi chhedta, purane manual SL/TP ek baar theek
 - **v1.03:** manual trades bilkul EA jaisa: Fib SL (1.0 ± $1), Fib TP (1.272 / 1.618, min $15), DCA 3 × $5 aapke lot se aur BUY+SELL dono side, 0.786 hedge (SL 0.5 + $1, TP 1.272). $5–20 seema ab option (`InpManualLimits`, default OFF)
+- **v1.04:** breakeven lock +$0.50 (pehle +$0.20): average se +$5 hote hi SL average + $0.50, EA, hedge aur manual sab trades par

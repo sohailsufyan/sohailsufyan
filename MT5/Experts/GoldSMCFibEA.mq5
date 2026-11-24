@@ -15,7 +15,7 @@
 //      7 StochRSI cross   8 Volume spike   9 Liquidity sweep (equal lows/highs bhi)   10 MACD   11 FVG zone me
 //   5. SL = Fib 1.0 (L) se $1 aage. TP = Fib 1.272 (strong trend 1.618), kam se kam $15.
 //      Smart TP: raaste me mazboot liquidity (equal highs/lows, POC, bada level) ho to usse $0.50 pehle.
-//   6. Average se +$5 -> saari positions ka SL = average + $0.20.
+//   6. Average se +$5 -> saari positions ka SL = average + $0.50.
 //   7. DCA: har $5 ulta, poore setup me max 3 (re-entry milakar), wahi lot, turant, 0.786 ke paar nahi.
 //   8. Fakeout: H1 candle 0.786 ke paar close -> hedge (fixed lot). Hedge SL = 0.5 ke paar + $1,
 //      TP = ulti taraf 1.272 (min $15). Hedge me breakeven hai, DCA default OFF (sirf 1 position).
@@ -30,7 +30,7 @@
 //  RISK: DCA + hedge se ek setup me 8 position tak ho sakti hain. Daily SL limit zaroor rakho.
 //+------------------------------------------------------------------+
 #property copyright "GoldSMCFibEA"
-#property version   "1.03"
+#property version   "1.04"
 #property description "XAUUSD H1: SMC + Fibonacci golden zone + confluence grade"
 
 #include <Trade/Trade.mqh>
@@ -92,7 +92,7 @@ input double          InpTPMinUSD       = 15.0;        // TP kam se kam entry se
 input bool            InpSmartTP        = true;        // Smart TP: raaste ki mazboot liquidity se pehle (min $15 ke baad)
 input double          InpTPLiqBufUSD    = 0.50;        // Smart TP: liquidity se itna $ pehle
 input double          InpBETriggerUSD   = 5.0;         // Average se itna $ profit = breakeven
-input double          InpBELockUSD      = 0.20;        // Breakeven SL = average + itna $
+input double          InpBELockUSD      = 0.50;        // Breakeven SL = average + itna $
 
 input group "=== DCA (turant, candle close nahi) ==="
 input bool            InpDCA            = true;        // DCA ON
@@ -1818,7 +1818,7 @@ void Panel()
    lastDraw = TimeLocal();
    int W = 380, y = 6;
    Rc("bg", 0, 0, W, 100, cBg);
-   Tx("ti", 10, y, "GOLD SMC FIB EA  v1.03", cTx, 10, true);
+   Tx("ti", 10, y, "GOLD SMC FIB EA  v1.04", cTx, 10, true);
    Tx("on", W - 70, y + 2, rtOn ? "RUNNING" : "OFF", rtOn ? cB : cS, 8, true);
    y += 20;
    int h4 = EmaStack(h4E1, h4E2, h4E3, h4E4, PERIOD_H4, false);

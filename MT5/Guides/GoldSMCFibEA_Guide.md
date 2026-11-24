@@ -1,4 +1,4 @@
-# Gold SMC Fib EA v1.03: Guide
+# Gold SMC Fib EA v1.04: Guide
 
 XAUUSD ka H1 swing EA. Isme SMC (BOS, liquidity sweep), Fibonacci golden zone aur 11 point ka confluence grade hai. Trade sirf high probability setup par hota hai. Aapke manual trade bhi isi strategy se manage hote hain.
 
@@ -83,7 +83,7 @@ Level(f) = H − f × (H − L)        (BUY)
 | **SL** | Fib 1.0 (L) se $1 aage |
 | **TP** | Fib 1.272. Strong trend (H1 + H4 EMA stack) me 1.618. Kam se kam **$15**. |
 | **Smart TP** | TP se pehle raaste me mazboot liquidity ho (equal highs/lows, POC, PDH/PWH/1M/3M/6M/Y) to TP usse **$0.50 pehle**, lekin $15 se kam nahi |
-| **Breakeven** | Average se **+$5** → saari positions ka SL **average + $0.20** |
+| **Breakeven** | Average se **+$5** → saari positions ka SL **average + $0.50** |
 | **DCA** | Har **$5 ulta**, **poore setup me max 3** (entry + re-entry milakar), wahi lot, **turant** (candle close nahi). 0.786 ke paar DCA nahi. Panel par `DCA x/3`. |
 | **Fakeout hedge** | H1 candle 0.786 ke paar close → ulti taraf **hedge** (fixed lot, sirf **1 position**). SL 0.5 ke paar + $1, TP ulti taraf 1.272 (min $15). Breakeven hai, **DCA nahi** (`InpHedgeDCA = false`). |
 | **Group close** | Default **OFF**: main aur hedge apne SL/TP se band hote hain. ON karoge (`InpGroupClose`) to total +$1 par sab band. |
@@ -109,7 +109,7 @@ Aap XAUUSD par trade kholo (bina SL/TP ke bhi chalega). EA use **bilkul apne tra
 | **Fib leg** | EA ka setup usi direction me ho to wahi leg, warna pichhla H1 swing (BUY: swing low → high, SELL: swing high → low) |
 | **SL** | Fib 1.0 ke $1 paar (BUY: L − $1, SELL: H + $1). Koi $5–20 ki seema nahi. Leg na mile to 1.5 × ATR(H1). |
 | **TP** | Fib 1.272 (strong trend me 1.618), kam se kam $15. Raaste me mazboot liquidity ho to usse $0.50 pehle. |
-| **Breakeven** | +$5 → SL average + $0.20 |
+| **Breakeven** | +$5 → SL average + $0.50 |
 | **DCA** | 3 × $5, **aapke trade ke lot se**, Fib 0.786 tak (SL ke $1 paas nahi). Sirf EA ke DCA gine jaate hain, aapke apne trade nahi. |
 | **BUY + SELL dono khule** | **Dono side DCA** lagega (har side ke 3 alag). Hedge nahi khulega, kyunki ye aapka apna hedge hai. |
 | **Hedge** | H1 close 0.786 ke paar → hedge (aapke lot se, 1 position). SL Fib 0.5 + $1, TP ulti taraf 1.272 (min $15). |
@@ -136,7 +136,7 @@ L = 3500, H = 3540 (leg $40)
 | Fakeout line 0.786 | 3508.56 |
 | SL | 3499.00 |
 | TP 1.272 / 1.618 | 3550.88 / 3564.72 |
-| Breakeven | 3520.30 par SL 3515.50 |
+| Breakeven | 3520.30 par SL 3515.80 |
 
 **0.01 lot par:** TP aaya to +$35.6 (strong trend me +$49.4). Entry + 1 DCA ke saath SL laga to lagbhag −$27.6.
 
