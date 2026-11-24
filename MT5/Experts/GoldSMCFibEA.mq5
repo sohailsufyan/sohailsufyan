@@ -18,7 +18,7 @@
 //   6. Average se +$5 -> saari positions ka SL = average + $0.20.
 //   7. DCA: har $5 ulta, max 3, wahi fixed lot, turant (candle close nahi), 0.786 ke paar nahi.
 //   8. Fakeout: H1 candle 0.786 ke paar close -> hedge (fixed lot). Hedge SL = 0.5 ke paar + $1,
-//      TP = ulti taraf 1.272 (min $15). Hedge me breakeven hai, DCA default OFF (sirf 1 position).
+//      TP = ulti taraf 1.272 (min $15). Hedge bhi entry jaisa: breakeven + max 3 DCA x $5 (InpHedgeDCA).
 //   9. Group close (option): main + hedge ka total >= +$1 -> sab band. Default OFF: dono apne SL/TP se.
 //  10. Breakeven par band hua aur setup valid -> M15 candle close confirmation par re-entry (max 2).
 //  11. Limits: din me max 7 trade, daily SL $, daily target, lagatar loss, weekly loss, equity stop.
@@ -95,14 +95,14 @@ input double          InpBELockUSD      = 0.20;        // Breakeven SL = average
 
 input group "=== DCA (turant, candle close nahi) ==="
 input bool            InpDCA            = true;        // DCA ON
-input int             InpDCAMax         = 3;           // Max DCA per basket
+input int             InpDCAMax         = 3;           // Max DCA har trade me (main aur hedge dono)
 input double          InpDCAStepUSD     = 5.0;         // Aakhri position se itna $ ulta = DCA
 
 input group "=== Fakeout hedge ==="
 input bool            InpHedge          = true;        // 0.786 ke paar H1 close = hedge (fixed lot)
 input double          InpHedgeSLBufUSD  = 1.0;         // Hedge SL = Fib 0.5 ke paar + itna $
 input double          InpHedgeExt       = 1.272;       // Hedge TP = ulti taraf ka extension
-input bool            InpHedgeDCA       = false;       // Hedge me bhi DCA (OFF = hedge sirf 1 position, DD kam)
+input bool            InpHedgeDCA       = true;        // Hedge me bhi DCA (max 3 x $5). OFF = hedge sirf 1 position, DD kam
 input bool            InpGroupClose     = false;       // Main + hedge ka total +$ hote hi sab band (OFF = dono apne SL/TP se)
 input double          InpGroupCloseUSD  = 1.0;         // Group close ON ho to: total itna +$ = sab band
 
