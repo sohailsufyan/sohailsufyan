@@ -146,6 +146,7 @@ Gold me **0.01 lot = $1 move par $1**.
 | $1,000 | 0.02, sirf A++ | $100 | `GoldSMCFib_3_APlusPlus_Only.set` |
 | $5,000 | 0.05 | $250 | `GoldSMCFib_4_5000.set` |
 | $10,000 | 0.10 | $500 | `GoldSMCFib_5_10000.set` |
+| $1,000 (aggressive) | 0.03, har grade, A++ par ×1.5 | $150 | `GoldSMCFib_6_1000_Aggressive.set` |
 
 Ek setup me sabse zyada **5 position** ho sakti hain: entry + 3 DCA + 1 hedge. Isliye lot chhota rakho aur **Daily SL limit** hamesha ON rakho.
 
