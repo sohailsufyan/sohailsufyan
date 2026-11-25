@@ -191,6 +191,13 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Assistant v1.21: breakeven trigger **+$1**, lock +$0.20, side ki sab positions par
 - Assistant v1.22: fix – breakeven ke baad nayi position judne par purana SL hata kar naye average se breakeven; panel me struct copy hataya (compile safe)
 
+# GoldM1Scalper (`Experts/GoldM1Scalper.mq5`) – M1 scalper, bina hedge
+- GoldHedgeScalper **v1.22** jaisa hi: M1 entry (TREND / BOTH), har trade TP +$1, $3 DCA (max 5 per side), BE +$1.5 → +$0.50, pair close, net close, manual trades, panel
+- **Hedge ka poora concept hataya:** recovery hedge, step hedge, Smart Hedge Kam, Auto LOCK, news LOCK, LOCK/UNLOCK buttons
+- News filter bacha hai (`InpNewsFilter`): badi USD news ke 15 min pehle/baad naya trade aur DCA nahi
+- Magic 777555 (GoldHedgeScalper wala hi): EA badalne par khule AUTO/DCA trade chalte rahenge. Purane HEDGE/LOCK trade ko ye EA nahi chhedta (panel par dikhte hain), unhe khud band karein
+- Loss me koi auto close nahi: DCA ke baad trade retracement par TP / breakeven / pair close se hi nikalte hain
+
 # GoldHedgeScalper (`Experts/GoldHedgeScalper.mq5`) – M1 hedge scalper
 - Har naye M1 candle par entry: **TREND** mode (EMA 21/50 + H1 EMA50) ya **BOTH** mode (BUY + SELL dono)
 - Har position ka apna **TP +$1** (turant profit), side me 2+ positions aur +$1.5 move → sab ka SL **average + $0.50**
