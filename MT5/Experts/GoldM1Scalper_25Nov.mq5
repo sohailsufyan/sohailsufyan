@@ -9,12 +9,13 @@
 //     Levels 0 / 0.382 / 0.5 / 0.618 / 0.65 / 0.786 / 1 / 1.27 chart par. Entry zone 0.5 - 0.65.
 //  3. Support / resistance: H4, D, 3D, W, 1M, 3M, 6M, Y ki pichhli candle ka Open / High / Low / Close.
 //  4. Liquidity sweep: M1 wick in levels / H1 swing / equal highs-lows ke paar, close wapas andar.
-//  5. Entry M1 candle close par. H1 UP = BUY, DOWN = SELL, SIDE = dono (sirf sweep).
-//     - Fib: M1 close 0.5 - 0.65 zone me, candle trend ki taraf
-//     - Sweep: trend ki taraf (SIDE me dono)
+//  5. Entry M1 par turant (har naya minute): H1 UP = BUY, H1 DOWN = SELL, H1 SIDE = koi naya trade nahi.
+//     - Ek minute me ek side par ek trade, ek side me max 5 entry (DCA alag)
+//     - Fib: M1 close 0.5 - 0.65 zone me, candle trend ki taraf (InpEntryMode = sirf Fib + sweep me bhi)
+//     - Sweep: trend ki taraf (InpSideBoth ON ho to SIDE me dono)
 //     - TP ke raaste me (InpRoomUSD ke andar) ulta level = entry nahi
 //     - High sweep ke baad 15 min BUY nahi, low sweep ke baad SELL nahi
-//     - M1 close Fib 1.0 ke paar = leg khatam (naye BOS / trend tak Fib entry nahi)
+//     - M1 close Fib 1.0 ke paar = leg khatam: us side naya trade nahi (naye leg / trend tak)
 //  6. Har trade TP +$1. Side +$1.5 chale to SL average + $0.50.
 //  7. DCA: side ki sabse kharab position se $10 ulta, pehle trade ke lot se, unlimited.
 //  8. Koi hedge / lock / SL nahi. Margin guard option (default 0 = off).
@@ -22,7 +23,7 @@
 // 10. Liquidity heatmap: swing highs/lows (equal = gehra rang), FVG, levels, volume profile.
 //+------------------------------------------------------------------+
 #property copyright "GoldM1Scalper"
-#property version   "2.00"
+#property version   "2.01"
 
 #include <Trade/Trade.mqh>
 
@@ -35,6 +36,7 @@
 #define  DCA_STEP 1.0
 
 enum ENUM_HMRANGE { HM_12H = 0, HM_1D = 1, HM_3D = 2, HM_1W = 3, HM_1M = 4, HM_ALL = 5 };
+enum ENUM_ENTRYMODE { ENTRY_EVERY_M1 = 0, ENTRY_FIB_SWEEP = 1 };
 
 input group "=== Lot ==="
 input bool            InpAutoLot        = false;       // Lot capital ke hisaab se (AUTO)
@@ -44,7 +46,7 @@ input double          InpLot            = 0.01;        // FIXED lot (entry; DCA 
 input group "=== Trend (H1, sirf candle close par) ==="
 input int             InpSwingBars      = 3;           // H1 swing = dono taraf itni candles
 input int             InpSwingLookback  = 200;         // Swing dhoondhne ke liye H1 candles
-input bool            InpSideBoth       = true;        // H1 SIDE = BUY + SELL dono (sirf sweep entry)
+input bool            InpSideBoth       = false;       // H1 SIDE me bhi BUY + SELL (sirf sweep par). OFF = trend nahi to trade nahi
 
 input group "=== Fibonacci (H1 leg) ==="
 input double          InpZoneTop        = 0.5;         // Entry zone shuru
@@ -61,8 +63,9 @@ input int             InpSweepBlockMin  = 15;          // Ulte sweep ke baad itn
 input double          InpRoomUSD        = 1.5;         // TP ke raaste me itne $ ke andar ulta level = entry nahi (0 = off)
 input double          InpEqualTolUSD    = 0.50;        // Equal highs/lows ki doori ($)
 
-input group "=== Entry (M1 candle close) ==="
+input group "=== Entry (M1, turant) ==="
 input bool            InpAutoOn         = true;        // Auto entry ON
+input ENUM_ENTRYMODE  InpEntryMode      = ENTRY_EVERY_M1; // Har minute H1 trend ki taraf turant / sirf Fib zone + sweep
 input int             InpMaxEntries     = 5;           // Ek side me max entry trade (DCA alag, unlimited)
 input bool            InpSessionOnly    = true;        // Sirf London + New York (GMT 7-21)
 input int             InpGMTOffset      = 2;           // Server time = GMT + ?
@@ -129,6 +132,7 @@ bool     newsNow = false;
 datetime lastNewsCheck = 0;
 datetime lastLowSweep = 0, lastHighSweep = 0;
 bool     legPending = true;   // shuruaat ka leg: ATR ready hone par
+int      legBrokenDir = 0;    // M1 close Fib 1.0 ke paar gaya = us side naya trade nahi (naye leg / trend tak)
 
 double   lvP[];  string lvN[];  color lvC[];  int lvS[];  int lvCnt = 0;   // H4 ... Y levels
 double   supP[]; int supN = 0;                                          // H1 swing lows + equal lows
@@ -391,6 +395,7 @@ bool SetLeg(int d, double L, double H, datetime tL, datetime tH, string why)
       return false;
      }
    LG.act = true; LG.dir = d; LG.L = L; LG.H = H; LG.tL = tL; LG.tH = tH;
+   legBrokenDir = 0;
    LG.touched = false; LG.extreme = 0; LG.tExt = 0;
    legWhy = why;
    PrintFormat("FIB LEG %s (%s): L %s  H %s | zone %s - %s | 0.786 %s",
@@ -453,7 +458,7 @@ void OnNewH1()
       bos = (t == 1 && c1 > sh1 && c2 <= sh1) || (t == -1 && c1 < sl1 && c2 >= sl1);
      }
    bool changed = t != curTrend;
-   if(changed) PrintFormat("H1 TREND: %s -> %s (%s)", TrendName(curTrend), TrendName(t), why);
+   if(changed) { PrintFormat("H1 TREND: %s -> %s (%s)", TrendName(curTrend), TrendName(t), why); legBrokenDir = 0; }
    curTrend = t; trendWhy = why;
    if(t == 0)
      {
@@ -472,6 +477,7 @@ void CheckInvalid()
    double c1 = iClose(_Symbol, PERIOD_M1, 1);
    if((LG.dir == 1 && c1 < LG.L) || (LG.dir == -1 && c1 > LG.H))
      {
+      legBrokenDir = LG.dir;
       LG.act = false; legWhy = "M1 close 1.0 ke paar";
       PrintFormat("FIB LEG khatam: M1 close %s, 1.0 (%s) ke paar", DS(c1), DS(LG.dir == 1 ? LG.L : LG.H));
       DrawFib();
@@ -631,10 +637,12 @@ void EntryFor(int d, SideInfo &s, int sw, string snm)
    bool allowed = curTrend == d || (curTrend == 0 && InpSideBoth);
    if(!allowed || s.ent >= InpMaxEntries || s.be) return;
    string side = d == 1 ? "BUY" : "SELL";
+   if(legBrokenDir == d) { sigTxt = side + " ruka: Fib leg toota (1.0 ke paar)"; return; }
    string tag = "", why = "";
    int fs = curTrend == d ? FibSignal(d) : 0;
    if(fs > 0) { tag = "F"; why = fs == 2 ? "Fib zone + 0.786 wick" : "Fib zone 0.5-0.65"; }
    else if(sw == d) { tag = "S"; why = "sweep " + snm; }
+   else if(InpEntryMode == ENTRY_EVERY_M1 && curTrend == d) { tag = "M"; why = "M1 scalp, H1 " + TrendName(curTrend); }
    if(tag == "") return;
    datetime opp = d == 1 ? lastHighSweep : lastLowSweep;
    if(opp > 0 && TimeCurrent() - opp < InpSweepBlockMin * 60)
@@ -647,7 +655,7 @@ void EntryFor(int d, SideInfo &s, int sw, string snm)
    if(!RoomOK(d, px, blk))
      {
       sigTxt = side + " ruka: raaste me " + blk;
-      PrintFormat("%s signal (%s) par entry nahi: TP ke raaste me %s", side, why, blk);
+      if(tag != "M") PrintFormat("%s signal (%s) par entry nahi: TP ke raaste me %s", side, why, blk);
       return;
      }
    double lot = CurLot();
@@ -1052,7 +1060,7 @@ void Panel()
    Rc("bg", 0, 0, W, 100, cBg);
    Tx("ti", 10, 6, TITLE, cTx, 10, true);
    bool wb = curTrend == 1 || (curTrend == 0 && InpSideBoth), ws = curTrend == -1 || (curTrend == 0 && InpSideBoth);
-   string tr = wb && ws ? "BUY+SELL (sweep)" : (wb ? "BUY" : (ws ? "SELL" : "-"));
+   string tr = wb && ws ? "BUY+SELL (sweep)" : (wb ? "BUY" : (ws ? "SELL" : "koi nahi"));
    Tx("st", 10, 24, StringFormat("H1: %s (%s) | trade %s | spread %s%s", TrendName(curTrend), trendWhy, tr, DS(Spread()), newsNow ? " | NEWS" : ""),
       newsNow ? cS : (curTrend == 1 ? cB : (curTrend == -1 ? cS : cDm)), 8, true);
    y = 42;

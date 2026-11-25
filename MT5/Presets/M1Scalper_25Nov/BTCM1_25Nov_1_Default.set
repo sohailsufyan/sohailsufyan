@@ -1,10 +1,10 @@
-; BTCM1Scalper_25Nov - 1_Default: Plan jaisa: 0.01 lot, DCA har $300 unlimited, koi brake nahi
+; BTCM1Scalper_25Nov v2.01 - 1_Default: H1 trend ki taraf har minute turant, 0.01 lot, DCA har $300 unlimited, koi brake nahi
 InpAutoLot=false
 InpBalancePer001=1000.0
 InpLot=0.01
 InpSwingBars=3
 InpSwingLookback=200
-InpSideBoth=true
+InpSideBoth=false
 InpZoneTop=0.5
 InpZoneBottom=0.65
 InpDeepFib=0.786
@@ -17,6 +17,7 @@ InpSweepBlockMin=15
 InpRoomUSD=45.0
 InpEqualTolUSD=25.0
 InpAutoOn=true
+InpEntryMode=0
 InpMaxEntries=5
 InpSessionOnly=false
 InpGMTOffset=2

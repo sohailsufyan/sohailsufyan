@@ -196,7 +196,8 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **Fibonacci (main):** H1 leg (BUY: swing low → high, SELL: high → low), levels 0 / 0.382 / 0.5 / 0.618 / 0.65 / 0.786 / 1 / 1.27 chart par, entry zone 0.5 – 0.65
 - **Support / resistance:** H4, D, 3D, W, 1M, 3M, 6M, Y ki pichhli candle ka O / H / L / C (3M / 6M / Y calendar ke hisaab se)
 - **Liquidity sweep:** M1 wick level / H1 swing / M15 equal highs-lows ke paar aur close wapas andar
-- **Entry M1 candle close par:** H1 UP = BUY, DOWN = SELL, SIDE = dono (sirf sweep); TP ke raaste me ulta level ho to entry nahi; ulte sweep ke 15 min baad tak us side entry nahi; M1 close Fib 1.0 ke paar = leg khatam
+- **Entry M1 par turant (v2.01):** har naya minute H1 UP = BUY, H1 DOWN = SELL, H1 SIDE = koi naya trade nahi (`InpSideBoth` ON = SIDE me sweep par dono); ek minute me ek side par ek trade, side me max 5 entry; Fib zone aur sweep par bhi entry; `InpEntryMode = sirf Fib zone + sweep` purana tareeka
+- **Rokne wale filter:** TP ke raaste me ulta level, ulte sweep ke 15 min baad tak us side, M1 close Fib 1.0 ke paar = us side naya trade nahi (naye leg / trend tak), spread, news, session
 - **Exit:** har trade TP (Gold +$1, BTC +$30), breakeven (Gold +$1.5 → +$0.50, BTC +$40 → +$20), pair close, net close; **koi SL / hedge / lock nahi**
 - **DCA:** sabse kharab position se Gold $10 / BTC $300 ulta, pehle trade ke lot se, **unlimited** (`InpDCAMax = 0`), margin guard default off (`InpMinMarginLevel = 0`)
 - **Liquidity heatmap andar:** swing highs/lows (equal = gehra rang, sweep ho chuke = dhundhle), FVG, levels, volume profile; panel se ON/OFF aur range 12H / 1D / 3D / 1W / 1M / ALL
