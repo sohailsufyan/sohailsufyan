@@ -201,7 +201,7 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - **DCA:** sabse kharab position se Gold $10 / BTC $300 ulta, pehle trade ke lot se, **unlimited** (`InpDCAMax = 0`), margin guard default off (`InpMinMarginLevel = 0`)
 - **Liquidity heatmap andar:** swing highs/lows (equal = gehra rang, sweep ho chuke = dhundhle), FVG, levels, volume profile; panel se ON/OFF aur range 12H / 1D / 3D / 1W / 1M / ALL
 - Default: FIXED lot 0.01, `InpManageManual = false` (GoldSMCFibEA bhi manual trades sambhalta hai), magic Gold 2511250 / BTC 2511251
-- Set files: `Presets/M1Scalper_25Nov/` – 1_Default (plan jaisa, DCA unlimited, koi brake nahi), 2_Safe (DCA max 10, margin 300% guard), 3_Demo_0.10lot (bada demo account)
+- Set files: `Presets/M1Scalper_25Nov/` – 1_Default (plan jaisa, DCA unlimited, koi brake nahi), 2_Safe (DCA max 10, margin 300% guard), 3_Demo_0.10lot (bada demo account), 4_Aggressive (0.05 lot, side me 10 entry, room filter OFF, 24 ghante, sweep block 5 min, leg 0.5 ATR se)
 
 # GoldM1Scalper (`Experts/GoldM1Scalper.mq5`) – M1 scalper, bina hedge
 - GoldHedgeScalper **v1.22** jaisa hi: M1 entry (TREND / BOTH), har trade TP +$1, $3 DCA (max 5 per side), BE +$1.5 → +$0.50, pair close, net close, manual trades, panel
