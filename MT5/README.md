@@ -191,6 +191,17 @@ Har naye basket se pehle 0-100 score banta hai; default **75+ (HIGH)** par hi en
 - Assistant v1.21: breakeven trigger **+$1**, lock +$0.20, side ki sab positions par
 - Assistant v1.22: fix – breakeven ke baad nayi position judne par purana SL hata kar naye average se breakeven; panel me struct copy hataya (compile safe)
 
+# GoldM1Scalper_25Nov / BTCM1Scalper_25Nov (`Experts/`) – M1 scalper, H1 Fib + SMC, 25 Nov 2026
+- **Trend sirf H1 candle close par** (price action): HH + HL = UP, LH + LL = DOWN, warna SIDE; H1 close pichhle swing ke paar = BOS
+- **Fibonacci (main):** H1 leg (BUY: swing low → high, SELL: high → low), levels 0 / 0.382 / 0.5 / 0.618 / 0.65 / 0.786 / 1 / 1.27 chart par, entry zone 0.5 – 0.65
+- **Support / resistance:** H4, D, 3D, W, 1M, 3M, 6M, Y ki pichhli candle ka O / H / L / C (3M / 6M / Y calendar ke hisaab se)
+- **Liquidity sweep:** M1 wick level / H1 swing / M15 equal highs-lows ke paar aur close wapas andar
+- **Entry M1 candle close par:** H1 UP = BUY, DOWN = SELL, SIDE = dono (sirf sweep); TP ke raaste me ulta level ho to entry nahi; ulte sweep ke 15 min baad tak us side entry nahi; M1 close Fib 1.0 ke paar = leg khatam
+- **Exit:** har trade TP (Gold +$1, BTC +$30), breakeven (Gold +$1.5 → +$0.50, BTC +$40 → +$20), pair close, net close; **koi SL / hedge / lock nahi**
+- **DCA:** sabse kharab position se Gold $10 / BTC $300 ulta, pehle trade ke lot se, **unlimited** (`InpDCAMax = 0`), margin guard default off (`InpMinMarginLevel = 0`)
+- **Liquidity heatmap andar:** swing highs/lows (equal = gehra rang, sweep ho chuke = dhundhle), FVG, levels, volume profile; panel se ON/OFF aur range 12H / 1D / 3D / 1W / 1M / ALL
+- Default: FIXED lot 0.01, `InpManageManual = false` (GoldSMCFibEA bhi manual trades sambhalta hai), magic Gold 2511250 / BTC 2511251
+
 # GoldM1Scalper (`Experts/GoldM1Scalper.mq5`) – M1 scalper, bina hedge
 - GoldHedgeScalper **v1.22** jaisa hi: M1 entry (TREND / BOTH), har trade TP +$1, $3 DCA (max 5 per side), BE +$1.5 → +$0.50, pair close, net close, manual trades, panel
 - **Hedge ka poora concept hataya:** recovery hedge, step hedge, Smart Hedge Kam, Auto LOCK, news LOCK, LOCK/UNLOCK buttons
